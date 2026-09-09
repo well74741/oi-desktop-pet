@@ -1,0 +1,33 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.log
+pet_settings.json
+chat_history.json
+chat_summary.json
+config.yaml
+*_backup_*.zip
+*.zip
+todo_data.json
+.claude/
+backups/
+
+*.lnk
+
+counter_data.json
+oi_pet/
+
+# ÓÃ»§Êı¾İÎÄ¼ş£¨¸÷×é¼ş³Ö¾Ã»¯£©
+token_usage.json
+usage_data.json
+canvas_data.json
+perler_data.json
+notes_data.json
+countdown_data.json
+launcher_data.json
+health_data.json
+mytemplate_data.json
+
+# æ‰“åŒ…äº§ç‰©ï¼ˆå®‰è£…åŒ…/exe ä¸çº³å…¥ç‰ˆæœ¬åº“ï¼‰
+*.exe
