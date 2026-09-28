@@ -19,8 +19,8 @@ from PyQt5.QtGui import (QBrush, QColor, QFont, QIcon, QImage, QPainter,
 from PyQt5.QtWidgets import (QApplication, QDialog, QGraphicsPathItem,
                              QGraphicsPixmapItem, QGraphicsScene, QGraphicsTextItem,
                              QGraphicsView, QHBoxLayout, QInputDialog, QLabel,
-                             QPushButton, QSlider, QVBoxLayout,
-                             QWidget)
+                             QPushButton, QSizePolicy, QSlider,
+                             QVBoxLayout, QWidget)
 
 import data_store
 from widgets import ModuleWidget, kit
@@ -515,7 +515,7 @@ class Widget(ModuleWidget):
                 "border-radius:7px;background:%s;}" % c))
             cb.clicked.connect(lambda _=False, cc=c: self._set_color(cc))
             self._color_btns.append(cb)
-            self._bar_row2_lay.addWidget(cb)
+            self._bar_row2_lay.addWidget(cb, 1)   # 与拼豆一致：色块平分整行
         # 当前颜色预览：挂在**色块行**末尾，吃掉这一行剩下的宽度（和拼豆
         # 工具栏同款）。放按钮行的话，9 个按钮再加一个可伸缩的框就会被挤到
         # 第二行去，算上色块行一共三行。
@@ -619,36 +619,43 @@ class Widget(ModuleWidget):
                 pass
 
     def _fit_bar_btns(self, avail_w):
-        """按钮一律用**和拼豆完全相同**的尺寸，只决定一行放几个、工具栏多宽。
+        """两行布局、两头顶满画布宽度：按钮和色块都**拉伸填满自己那一行**。
 
-        历程（三次返工，别再改成"按宽度缩放"了）：
-        1) 最早写死 `bubble_token("icon_button_*")` —— 对的，但那会儿工具栏被限宽，
-           9 个按钮挤不下、右边几个被裁在画布外，看着像"按钮太小"；
-        2) 改成按可用宽度按比例放大 —— 窄气泡下反而更小；
-        3) 改成拉伸填满 + 上限 1.6 倍 —— 又比拼豆大出一圈，还被预览框挤成三行。
-        用户要的一直是"和拼豆一样大"。所以尺寸就取基准 token（= 拼豆那颗），
-        不放大也不缩小；宽度富余留给色块行末尾的颜色预览框。
+        这就是拼豆的做法（`addWidget(b, 1)` 让控件平分整行宽度），画布照搬：
+        工具栏横跨整个画布，行 1 是 9 个工具按钮，行 2 是 11 个色块 + 当前颜色
+        预览框，各自平分宽度。
+
+        四次返工的教训（别再改了）：
+        1) 写死 token 尺寸 + 工具栏限宽 → 9 个按钮挤不下，右边几个被裁在画布外；
+        2) 按可用宽度按比例放大 → 窄气泡下反而更小；
+        3) 拉伸填满但不顶满宽度 + 上限 1.6 倍 → 比拼豆大一圈，还被预览框挤成三行；
+        4) 回到写死 token → 画布 290px 宽而按钮只占 224px，又显得小又空。
+        正解是"和拼豆同一种布局语言"：**顶满宽度 + 平分**，尺寸由宽度自然决定，
+        高度取 token（和拼豆同高），下限保证不瘦过 token 宽。
         """
         btns = getattr(self, "_bar_btns", None)
         if not btns:
             return 0
         n = len(btns)
-        w = kit.bubble_token("icon_button_width")     # 与拼豆同一个 token
-        h = kit.bubble_token("icon_button_height")
+        min_w = kit.bubble_token("icon_button_width")   # 不许比拼豆那颗更瘦
+        h = kit.bubble_token("icon_button_height")      # 与拼豆同高
         m = self._bar_v.contentsMargins()
         sp = self._bar_row1_lay.spacing()
-        edge = kit.bs(6)                       # 工具栏距画布右边缘
-        outer = max(w * 2, int(avail_w) - self._side_slider_w() - edge - 2)
-        inner = max(w, outer - m.left() - m.right())
-        # 一行能放几个（按钮不缩小，放不下才换行），再把按钮均分到各行
-        fit = max(1, int((inner + sp) // (w + sp)))
+        edge = kit.bs(2)                        # 工具栏距画布左右边缘
+        outer = max(min_w * 2, int(avail_w) - edge * 2)
+        inner = max(min_w, outer - m.left() - m.right())
+        # 一行放几个：按钮最少 min_w 宽，放不下才换行（正常档位下 9 个都放得下）
+        fit = max(1, int((inner + sp) // (min_w + sp)))
         rows_n = max(1, -(-n // fit))
         per_row = max(1, -(-n // rows_n))
-        icon = max(kit.bubble_token("icon"), int(min(w, h) * 0.78))
+        icon = max(kit.bubble_token("icon"), int(h * 0.78))
         for b in btns:
             try:
-                if b.width() != w or b.height() != h:
-                    b.setFixedSize(w, h)
+                b.setMinimumWidth(min_w)
+                b.setMaximumWidth(16777215)     # 交给布局拉伸
+                b.setFixedHeight(h)
+                b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                if b.iconSize().width() != icon:
                     b.setIconSize(QSize(icon, icon))
             except RuntimeError:
                 pass
@@ -657,7 +664,7 @@ class Widget(ModuleWidget):
             self._reflow_bar_rows(per_row, h)
         try:
             self._cur_color.setFixedHeight(max(kit.bs(10), h - kit.bs(2)))
-            self._cur_color.setMinimumWidth(w * 2)
+            self._cur_color.setMinimumWidth(min_w)
         except Exception:
             pass
         self._fit_bar_row2(inner, sp, h)
@@ -675,7 +682,10 @@ class Widget(ModuleWidget):
         if not cbs:
             return
         nc = len(cbs)
-        sw = kit.bs(14)                # 和拼豆同一个尺寸，不随宽度长大
+        # 色块和拼豆一样是**固定的小圆点**：布局里给了 stretch=1，但固定尺寸
+        # 会赢，stretch 只把多余空间摊成均匀的间隙（拼豆就是这个效果）。
+        # 让色块跟着拉伸的话会变成一排椭圆。
+        sw = kit.bs(14)
         for cb in cbs:
             try:
                 if cb.width() != sw or cb.height() != sw:
@@ -705,7 +715,7 @@ class Widget(ModuleWidget):
                 old.layout().removeWidget(b)
             if old is not host:
                 b.setParent(host)
-            host.layout().addWidget(b)
+            host.layout().addWidget(b, 1)   # stretch=1：平分整行宽度
             b.show()
         # 注意：「当前颜色」预览框不参与这里的重排，它常驻在色块行末尾。
         for i, host in enumerate(rows):
@@ -726,14 +736,15 @@ class Widget(ModuleWidget):
         if sl is None:
             return
         w, h = self._expand.width(), self._expand.height()
-        sh = max(kit.bs(40), min(int(h * 0.45), kit.bs(110)))
+        # 工具栏现在横跨整个画布宽度，滑条要让到它**下面**去，不然会被压住
+        top = 4 + (self._bar.height() if self._bar.isVisible() else 0) + kit.bs(4)
+        sh = max(kit.bs(40), min(int((h - top) * 0.6), kit.bs(110)))
         sl.setFixedHeight(sh)
-        sl.move(kit.bs(4), max(2, (h - sh) // 2))
+        sl.move(kit.bs(4), max(top, top + (h - top - sh) // 2))
         sl.raise_()
 
     def _place_bar(self):
         w = self._expand.width()
-        self._place_side_slider()
         bar_w = self._fit_bar_btns(w)
         # 先把内部布局跑一遍再定尺寸：不激活的话拿到的是**上一轮**的 sizeHint，
         # 工具栏会按旧宽度摆位（实测拉宽画布时位置慢一拍）
@@ -748,9 +759,10 @@ class Widget(ModuleWidget):
         # sizeHint 只会给它最小宽度，于是那块空余永远填不满
         if bar_w:
             self._bar.resize(int(bar_w), self._bar.height())
-        self._bar.move(max(self._side_slider_w() + 2,
-                           w - self._bar.width() - kit.bs(4)), 4)
+        self._bar.move(kit.bs(2), 4)     # 两头顶满：贴左边缘，宽度已是画布宽
         self._bar.raise_()
+        # 滑条摆位放在最后：它要让到工具栏下面，得先知道工具栏最终多高
+        self._place_side_slider()
 
     def _place_bar_tab(self):
         w = self._expand.width()

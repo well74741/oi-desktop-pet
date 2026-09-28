@@ -880,6 +880,70 @@ check("拖气泡移桌宠：和直接拖桌宠用的是同一套钳制/吸附（
           os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "bubble_layout.py"), encoding="utf-8").read())
 
+# ---------- 环绕桌宠：把桌宠嵌进短列下方的凹口，整体占地最小 ----------
+# 用户要求"把桌宠和气泡看成一个整体，以整体面积最小为目标排列"。分列之后各列
+# 高度不齐，靠桌宠那侧的列下方就是一块空缺，而且 _apply_col_mask 早就把它从
+# 窗口遮罩里挖掉了——桌宠摆进去照样看得见点得到。
+from PyQt5.QtCore import QRect as _QRect2                      # noqa: E402
+
+_nb = StatusBubbleLayout(FakePet2())
+_nb.pet.resize(136, 136)
+_nb._refresh = lambda *a, **k: None
+for _t in ("_timer", "_mv_timer"):
+    _tm = getattr(_nb, _t, None)
+    if _tm is not None:
+        _tm.stop()
+_COL = _nb._FIX_W
+_SCR = _QRect2(0, 0, 1920, 1080)
+
+
+def _nook_case(col_hs, pet_x, pet_y, place_left):
+    """喂一组列高，返回 (是否嵌入, 整体宽, 并排需要的宽, 是否压住桌宠)。"""
+    _nb._col_panels = [(i * _COL, 0, _COL, h) for i, h in enumerate(col_hs)]
+    _nb._ncols = len(col_hs)
+    _w = _COL * len(col_hs)
+    _hh = max(col_hs)
+    _nb.resize(_w, _hh)
+    _nb.pet.move(pet_x, pet_y)
+    _pc = QPoint(pet_x + _nb.pet.width() // 2, pet_y)
+    _clear = _nb.pet.width() // 2
+    _dock = _nb._nook_dock(_hh, _pc, _SCR, _w, _clear, place_left)
+    _pet_r = _QRect2(pet_x, pet_y, _nb.pet.width(), _nb.pet.height())
+    if _dock is None:
+        _x = (max(_SCR.left(), _pc.x() - _clear - _w - 8) if place_left
+              else min(_SCR.right() - _w, _pc.x() + _clear + 8))
+        _y = max(_SCR.top(), min(_pc.y() + _nb.pet.height() // 2 - _hh // 2,
+                                 _SCR.bottom() - _hh))
+    else:
+        _x, _y = _dock
+    _bub_r = _QRect2(_x, _y, _w, _hh)
+    _solid = any(_QRect2(_x + i * _COL, _y, _COL, ch).intersects(_pet_r)
+                 for i, ch in enumerate(col_hs))
+    return (_dock is not None, _bub_r.united(_pet_r).width(),
+            _w + _nb.pet.width(), _solid)
+
+# 凹口够深 + 桌宠在下半屏：应当嵌进去，整体宽度省掉一整列
+for _nm, _hs, _px, _py, _left in (("气泡在左", [700, 380], 1500, 700, True),
+                                  ("气泡在右", [380, 700], 200, 700, False),
+                                  ("桌宠靠底", [700, 300], 1500, 900, True),
+                                  ("三列最右最短", [700, 700, 300], 1500, 700, True)):
+    _docked, _uw, _side_w, _solid = _nook_case(_hs, _px, _py, _left)
+    # 嵌进去之后桌宠横向完全落在气泡的跨度里，整体宽度就等于气泡自己的宽度，
+    # 比"并排摆"整整省下一个桌宠的身宽
+    check("环绕桌宠(%s)：桌宠横向嵌进气泡跨度，整体宽度省掉一个桌宠身宽"
+          "（并排 %d -> 环绕 %d）" % (_nm, _side_w, _uw),
+          _docked and _uw <= _side_w - _nb.pet.width() + 8)
+    check("环绕桌宠(%s)：桌宠没被气泡的实心列压住" % _nm, not _solid)
+
+# 凹口不够 / 伸不开：必须老实退回并排，不能硬塞
+for _nm, _hs, _px, _py, _left in (("凹口太浅", [700, 660], 1500, 700, True),
+                                  ("桌宠偏上伸不开", [700, 380], 1500, 300, True),
+                                  ("单列", [700], 1500, 700, True)):
+    _docked, _uw, _side_w, _solid = _nook_case(_hs, _px, _py, _left)
+    check("环绕桌宠(%s)：放不下就退回并排，不硬塞" % _nm, not _docked)
+    check("环绕桌宠(%s)：退回并排时也没压住桌宠" % _nm, not _solid)
+_nb.close()
+
 # ---------- 「气泡保持」开着时，「关闭气泡」也必须管用 ----------
 # 回归：hide_animated() 一看到 _pinned 就 return，于是开了气泡保持之后点
 # 关闭气泡毫无反应（用户反馈）。关闭是更强的意图，应当压过保持状态。

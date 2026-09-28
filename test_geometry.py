@@ -225,9 +225,14 @@ for _n in _AI_WIDGETS:
     check("AI 按钮(%s)：有说明提示" % _n,
           _ai is not None and "AI" in _ai.toolTip())
 
-# ---------- 画布工具栏：尺寸必须和拼豆一模一样 ----------
-# 反复返工三次的地方，把结论钉死：用户要的是"和拼豆一样"，不是"不小于拼豆"，
-# 也不是"按宽度缩放"。按钮/色块都取和拼豆同一个 token，任何宽度下都不变。
+# ---------- 画布工具栏：两行 + 两头顶满画布宽度（和拼豆同一种布局语言）----------
+# 这地方返工过五次，把结论钉死，别再改成"按 token 写死尺寸"：
+#   写死 token + 限宽 → 按钮挤不下被裁在画布外；
+#   按比例放大 → 窄气泡下反而更小；
+#   拉伸但不顶满 + 上限 1.6 倍 → 比拼豆大一圈，还被预览框挤成三行；
+#   回到写死 token → 画布 290px 宽而按钮只占 224px，又小又空。
+# 正解 = 拼豆的做法：**顶满宽度 + 平分**（addWidget(w, 1)），
+# 按钮宽度由画布宽自然决定、下限不瘦过 token；色块是固定圆点，stretch 只均摊间隙。
 _pl, _ = load_module_widget("perler")
 _cv, _ = load_module_widget("canvas")
 if _cv is None or _pl is None:
@@ -243,40 +248,40 @@ else:
     check("画布工具栏：粗细滑条是竖的，悬浮在画布侧边（不占工具栏宽度）",
           _cv._width_slider.orientation() == _QtCore.Qt.Vertical
           and _cv._width_slider.parent() is _cv._expand)
+    _min_w = kit.bubble_token("icon_button_width")
     _obs = []
-    for _cw in (290, 300, 360, 480, 640):
+    for _cw in (260, 290, 300, 360, 480):
         _cv.resize(_cw, 260)
         _cv._expand.resize(_cw, 240)
         _cv._place_bar()
         app.processEvents()
         _sl = _cv._width_slider
-        _obs.append((_cw, _cv._bar_btns[0].size(), _cv._color_btns[0].width(),
+        _obs.append((_cw, _cv._bar_btns[0].width(), _cv._bar_btns[0].height(),
+                     _cv._color_btns[0].size(),
                      sum(1 for r in _cv._bar_rows if r.isVisible()),
-                     _cv._cur_color.width(),
-                     _cv._bar.x(), _cv._bar.width(), _sl.x() + _sl.width()))
-    _bad = [(o[0], o[1].width()) for o in _obs
-            if o[1] != _pl._btn_pen.size()]
-    check("画布工具栏：按钮和拼豆完全同尺寸（%dx%d），任何宽度下都不变"
-          % (_pl._btn_pen.width(), _pl._btn_pen.height()),
-          not _bad, "不一样的：%s" % (_bad[:3],))
-    _badc = [(o[0], o[2]) for o in _obs if o[2] != _pl._color_btns[0].width()]
-    check("画布工具栏：色块也和拼豆同尺寸（%d px）"
-          % _pl._color_btns[0].width(), not _badc, "不一样的：%s" % (_badc[:3],))
-    check("画布工具栏：常用宽度下就是「一行按钮 + 一行色块」，不是三行（%s）"
-          % ([o[3] + 1 for o in _obs],),
-          all(o[3] == 1 for o in _obs))
-    check("画布工具栏：颜色预览框在色块行、吃掉那一行的富余（%d -> %d px）"
-          % (_obs[0][4], _obs[-1][4]),
-          _cv._cur_color.parent() is _cv._bar_row2 and _obs[-1][4] > _obs[0][4])
-    check("画布：预览框一开始就上了色",
-          "background" in _cv._cur_color.styleSheet())
+                     _cv._bar.x(), _cv._bar.width(), _sl.y()))
+    check("画布工具栏：两头顶满画布宽度（剩余边距 %s px）"
+          % ([o[0] - (o[5] + o[6]) for o in _obs],),
+          all(0 <= o[0] - (o[5] + o[6]) <= kit.bs(6) for o in _obs))
+    check("画布工具栏：按钮宽度随画布拉伸（%s），且都不瘦过拼豆那颗（%d px）"
+          % ([o[1] for o in _obs], _min_w),
+          _obs[-1][1] > _obs[0][1] and all(o[1] >= _min_w for o in _obs))
+    check("画布工具栏：按钮高度与拼豆一致（%d px）" % _pl._btn_pen.height(),
+          all(o[2] == _pl._btn_pen.height() for o in _obs))
+    check("画布工具栏：色块是固定圆点，不跟着拉成椭圆（%s）"
+          % ([(o[3].width(), o[3].height()) for o in _obs[:2]],),
+          all(o[3].width() == o[3].height() == _pl._color_btns[0].width()
+              for o in _obs))
+    check("画布工具栏：就是「一行按钮 + 一行色块」两行（%s）"
+          % ([o[4] + 1 for o in _obs],), all(o[4] == 1 for o in _obs))
+    check("画布工具栏：竖滑条让在工具栏下方，不被压住",
+          all(o[7] >= _cv._bar.y() + _cv._bar.height() for o in _obs))
+    check("画布：颜色预览框在色块行、一开始就上了色",
+          _cv._cur_color.parent() is _cv._bar_row2
+          and "background" in _cv._cur_color.styleSheet())
     check("调色板：画布和拼豆用同一份（都来自 kit.PALETTE，%d 色）"
           % len(kit.PALETTE),
           len(_cv._color_btns) == len(_pl._color_btns) == len(kit.PALETTE))
-    _out = [(o[0], o[5] + o[6]) for o in _obs if o[5] + o[6] > o[0] - 2]
-    check("画布工具栏：任何宽度下都在画布内", not _out, "探出去：%s" % (_out[:2],))
-    _ov = [(o[0], o[5], o[7]) for o in _obs if o[5] < o[7]]
-    check("画布工具栏：不压住侧边那根竖滑条", not _ov, "压住：%s" % (_ov[:2],))
     check("画布工具栏：AI 按钮不在工具栏里重复出现（已挪到标题行）",
           not hasattr(_cv, "_btn_ai"))
     _cv.close()

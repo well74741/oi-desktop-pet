@@ -3628,10 +3628,59 @@ class StatusBubble(QWidget):
         except Exception:
             return "above"
 
+    def _nook_dock(self, hh, pc, g, w, clear, place_left):
+        """环绕桌宠：把桌宠嵌进"短列下方那块空缺"里，整体外接矩形窄掉一整列。
+
+        分列之后各列高度不同，靠桌宠那一侧的列如果明显更矮，它下方就是一块
+        空的凹口——而且 `_apply_col_mask` 早就把那块从窗口遮罩里挖掉了，
+        所以桌宠摆进去照样看得见、点得到，不是被气泡压住。
+
+        返回 (x, y) 或 None（放不进去就让调用方按老办法摆在旁边）。
+        """
+        panels = getattr(self, "_col_panels", None) or []
+        if len(panels) < 2:
+            return None
+        col_w = int(self._FIX_W)
+        # 靠桌宠那一侧的列：气泡在左边时是最后一列，在右边时是第一列
+        near = panels[-1] if place_left else panels[0]
+        near_h = int(near[3])
+        full = max(int(p[3]) for p in panels)
+        pet_h = self.pet.height()
+        pet_top = pc.y()
+        gap = _bs(6)
+        nook_h = full - near_h
+        if nook_h < pet_h + gap * 2:
+            return None                  # 凹口装不下桌宠
+        # 让凹口顶边正好落在桌宠上边之上一点，桌宠就坐进凹口里
+        y = pet_top - gap - near_h
+        y = max(g.top(), min(y, g.bottom() - hh))
+        # 夹到屏幕内之后要复核：凹口必须真的整个罩住桌宠，否则会压住它
+        if not (y + near_h <= pet_top and y + full >= pet_top + pet_h):
+            return None
+        if place_left:
+            # 往右挪一整列：那一列横向与桌宠重叠，但桌宠落在它下方的凹口里
+            x = pc.x() - clear - w + col_w
+        else:
+            x = pc.x() + clear - col_w
+        x = max(g.left(), min(int(x), g.right() - w))
+        # 夹完再复核横向：靠桌宠那一列必须真的盖过桌宠所在的横向区间，
+        # 否则就是白挪一列（桌宠悬在气泡外面，整体反而更宽）
+        if place_left:
+            near_x0, near_x1 = x + w - col_w, x + w
+        else:
+            near_x0, near_x1 = x, x + col_w
+        if not (near_x0 <= pc.x() and pc.x() + 0 <= near_x1):
+            return None
+        return int(x), int(y)
+
     def _side_geom(self, hh, pc, g, menu_r=0, prefer=None):
         """上下都放不下时：放到桌宠左右侧（菜单展开时同时让开菜单盘），
         垂直居中于桌宠，不挡桌宠与菜单。prefer 为 "left"/"right" 时，仅当该侧
-        仍有足够空间才保持（避免左右来回跳），否则按屏幕空间选宽松一侧。"""
+        仍有足够空间才保持（避免左右来回跳），否则按屏幕空间选宽松一侧。
+
+        多列且靠桌宠那列明显更矮时，先试「把桌宠嵌进凹口」（见 _nook_dock）——
+        桌宠和气泡当成一个整体看，这样整体占的地方最小。
+        """
         w = self.width()
         pet_cx = pc.x()
         pet_cy = pc.y() + self.pet.height() // 2
@@ -3642,6 +3691,10 @@ class StatusBubble(QWidget):
             place_left = True
         elif prefer == "right" and pet_cx + clear + 8 + w <= g.right():
             place_left = False
+        if menu_r <= 0:      # 菜单展开时不玩嵌套，菜单盘会压到气泡上
+            dock = self._nook_dock(hh, pc, g, w, clear, place_left)
+            if dock is not None:
+                return dock[0], dock[1], ("left" if place_left else "right")
         if place_left:
             x = max(g.left(), pet_cx - clear - w - 8)
             mode = "left"
