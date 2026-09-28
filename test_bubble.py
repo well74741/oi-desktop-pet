@@ -880,6 +880,60 @@ check("拖气泡移桌宠：和直接拖桌宠用的是同一套钳制/吸附（
           os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "bubble_layout.py"), encoding="utf-8").read())
 
+# ---------- 行折叠：宽度/列数变化也要在动画里完成，末尾不许跳 ----------
+# 回归（用户报"计算器展开收起时最后一刻跳一下"）：收起一个大组件可能让两列缩成
+# 一列，但 _apply_size 用的是 setFixedWidth()（min=max 锁死），折叠动画里的
+# setGeometry 改不动宽度；等动画结束、下一次定时刷新再 setFixedWidth 才一帧切
+# 过去 —— 实测宽度从 630 一帧跳到 315，位置跟着跳 83~102px。
+_wfb = StatusBubbleLayout(FakePet2())
+_wfb.pet.resize(75, 75)
+_wfb._refresh = lambda *a, **k: None
+for _t in ("_timer", "_mv_timer"):
+    _tm = getattr(_wfb, _t, None)
+    if _tm is not None:
+        _tm.stop()
+_wcalc, _werr = load_module_widget("calc")
+check("行折叠宽度：计算器组件能加载（%s）" % (_werr or "ok"), _wcalc is not None)
+if _wcalc is not None:
+    # 12 个文字行 + 计算器：收起计算器时列数会从 2 变 1
+    _wfb._disp_rows = ([("模块%d" % i, "%d" % i, None) for i in range(12)]
+                       + [("计算器", "", _wcalc)])
+    _wfb._relayout()
+    _wfb.show()
+    app.processEvents()
+    _w_before = _wfb.width()
+    _cols_before = _wfb._ncols
+    _wrapc = _wfb._wrap_of(_wcalc)
+    _wseq = []
+    _wrapc.fold_btn.click()
+    _dl = time.time() + 2
+    while time.time() < _dl and getattr(_wfb, "_rowfold", None) is not None:
+        app.processEvents()
+        time.sleep(0.004)
+        _g = _wfb.geometry()
+        if not _wseq or _wseq[-1] != (_g.x(), _g.width()):
+            _wseq.append((_g.x(), _g.width()))
+    app.processEvents()
+    _w_end = _wfb.width()
+    # 动画停下之后，按布局重算一次该多宽 —— 和末帧不一致就是"最后一刻跳一下"
+    _wfb._apply_size(_wfb._FIX_W)
+    app.processEvents()
+    check("行折叠宽度：收起让列数真的变少了（%d 列 -> %d 列）"
+          % (_cols_before, _wfb._ncols), _wfb._ncols < _cols_before)
+    check("行折叠宽度：动画结束时宽度已是终局，刷新不会再切一次（%d -> %d）"
+          % (_w_end, _wfb.width()), abs(_wfb.width() - _w_end) <= 2)
+    check("行折叠宽度：宽度是在动画里逐步变的，不是一帧切（宽度取值 %s）"
+          % (sorted({w for _x, w in _wseq}),),
+          len({w for _x, w in _wseq}) >= 2)
+    _wsteps = [abs(_wseq[i + 1][0] - _wseq[i][0])
+               for i in range(len(_wseq) - 1)]
+    check("行折叠宽度：横向位置也在动画里跟着走，单帧位移不超过 40px（最大 %d）"
+          % (max(_wsteps) if _wsteps else 0),
+          not _wsteps or max(_wsteps) <= 40)
+    check("行折叠宽度：多余的列被收起来了，不残留在画面上",
+          all(not _c.isVisible() for _c in _wfb._columns[_wfb._ncols:]))
+_wfb.close()
+
 # ---------- 环绕桌宠：把桌宠嵌进短列下方的凹口，整体占地最小 ----------
 # 用户要求"把桌宠和气泡看成一个整体，以整体面积最小为目标排列"。分列之后各列
 # 高度不齐，靠桌宠那侧的列下方就是一块空缺，而且 _apply_col_mask 早就把它从

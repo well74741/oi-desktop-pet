@@ -1031,6 +1031,29 @@ class StatusBubbleLayout(StatusBubble):
         self._rowfold = {"wrap": wrap, "h0": float(h0), "h1": float(h1),
                          "t0": time.monotonic(), "dur": _dist_dur(h1 - h0),
                          "anchor": anchor, "mode": mode, "fx": self.x()}
+        # 终局的 x：先按"行已经是目标高度"算一遍尺寸，再问摆位逻辑该放哪儿。
+        # 收起一个大组件可能让两列缩成一列，宽度一变、侧边摆放的居中位置就变。
+        try:
+            self._rowfold["x0"] = self.x()
+            _h_keep = wrap.height()
+            wrap.setFixedHeight(max(10, int(round(h1))))
+            _tw, _fh, _chs, _cols = self._measure()
+            wrap.setFixedHeight(_h_keep)
+            # _compute_target_geom 读的是 self.width()（当前宽度），而我们要问的是
+            # "宽度变成 _tw 之后该摆哪儿"。所以先把窗口宽度临时设成终局值再问，
+            # 问完立刻复原——不这么做算出来的还是旧宽度对应的位置。
+            _w_keep = (self.minimumWidth(), self.maximumWidth(), self.width())
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
+            self.resize(int(_tw), self.height())
+            _tx, _ty, _mode = self._compute_target_geom(
+                _fh, self._side_hint or self._current_side())
+            self.resize(_w_keep[2], self.height())
+            self.setMinimumWidth(_w_keep[0])
+            self.setMaximumWidth(_w_keep[1])
+            self._rowfold["x1"] = int(_tx)
+        except Exception:
+            self._rowfold["x0"] = self._rowfold["x1"] = self.x()
         try:
             self._mv_timer.stop()      # 位置缓动会和折叠几何互相拉扯
         except Exception:
@@ -1045,7 +1068,14 @@ class StatusBubbleLayout(StatusBubble):
     def _rowfold_frame(self, a, h):
         """把这一帧的行高摆进去，并同步整框几何（与对话折叠同一条路径）。"""
         a["wrap"].setFixedHeight(max(10, int(round(h))))
-        total_w, full_h, col_hs, _cols = self._measure()
+        total_w, full_h, col_hs, cols = self._measure()
+        # 分列结果变了（收起一个大组件可能让两列缩成一列）就当场重排一次：
+        # 行是物理放在各列的布局里的，只改窗口宽度的话，第二列那些行会被裁在
+        # 窗口外面直接看不见。只在签名变化时做，不是每帧都做。
+        if self._groups_sig(cols) != getattr(self, "_col_groups", None):
+            rows = [w for w in self._row_widgets if _w_is_alive(w)]
+            self._layout_rows(rows)
+            total_w, full_h, col_hs, cols = self._measure()
         self._full_h = full_h
         self._col_panels = [(i * self._FIX_W, 0, self._FIX_W, ch)
                             for i, ch in enumerate(col_hs)]
@@ -1062,13 +1092,32 @@ class StatusBubbleLayout(StatusBubble):
             self._fold_locked = False
             return
         k = min(1.0, (time.monotonic() - a["t0"]) / max(0.01, a["dur"]))
+        # 横向锚点跟着走：宽度在动画里可能变（两列缩成一列），而气泡在桌宠侧边
+        # 时是"居中于桌宠"的，宽度一变目标 x 就变。不在动画里插值的话，动画结束
+        # 后位置缓动才开始追，看着就是收完了又滑一段。
+        a["fx"] = self._fold_x_at(a, ease_in_out(k))
         self._rowfold_frame(a, a["h0"] + (a["h1"] - a["h0"]) * ease_in_out(k))
         if k >= 1.0:
             self._rowfold_timer.stop()
             self._rowfold = None
+            a["fx"] = self._fold_x_at(a, 1.0)
             self._rowfold_frame(a, a["h1"])   # 末帧精确落在目标上，不留零头
             self._fold_locked = False
             self._place()
+
+    def _fold_x_at(self, a, e):
+        """折叠动画进行到缓动值 e 时，窗口该在哪个 x。
+
+        起点是点击那一刻的 x，终点是"按终局宽度算出来的 x"——两端之间线性插值，
+        于是宽度、高度、位置在同一段动画里一起到位。
+        """
+        x0 = a.get("x0")
+        if x0 is None:
+            return a["fx"]
+        x1 = a.get("x1")
+        if x1 is None:
+            return x0
+        return int(round(x0 + (x1 - x0) * e))
 
     def _measure(self, col_w=None):
         """算出当前该多大：返回 (总宽, 总高, 每列高度, 每列的行)。
@@ -1208,15 +1257,28 @@ class StatusBubbleLayout(StatusBubble):
             y = anchor
         else:
             y = anchor - full_h
+        # 宽度必须先解锁：正常布局走的是 `setFixedWidth()`（把 min=max 锁死），
+        # 折叠动画里 setGeometry 根本改不动宽度。列数在动画中变少时（比如收起一个
+        # 大组件，两列缩成一列），窗口会一直保持旧宽度，等动画结束、下一次定时
+        # 刷新再 setFixedWidth 才一帧切过去 —— 实测宽度从 630 一帧跳到 315，
+        # 就是用户说的"最后一刻跳一下"。
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(16777215)
         # 先定窗口几何（锚点固定），再跟内容，避免内容先移动露出窗口外造成残影
         self.setGeometry(fx, y, total_w, full_h)
+        for col in self._columns:
+            col.setFixedWidth(int(self._FIX_W))
         self._content.setGeometry(0, 0, total_w, full_h)
         for i, col in enumerate(self._columns):
             if i < len(col_hs):
                 col.setGeometry(i * self._FIX_W, 0, self._FIX_W, col_hs[i])
+                col.show()
+            else:
+                col.hide()      # 列数变少时多余的列要收起来，否则残留在画面上
             lay = col.layout()
             if lay is not None:
                 lay.activate()
+        self._ncols = max(1, len(col_hs))
         self._apply_col_mask(total_w, full_h)
         self._content.update()
         self.update()
