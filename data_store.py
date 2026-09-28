@@ -127,6 +127,7 @@ def read_json_path(path, default=None):
 def write_json_path(path, obj):
     """按绝对路径原子写 JSON（临时文件 + os.replace），带锁。"""
     with _LOCK:
+        snapshot(path)
         tmp = None
         try:
             d = os.path.dirname(path) or "."
@@ -141,6 +142,53 @@ def write_json_path(path, obj):
                     os.remove(tmp)
                 except Exception:
                     pass
+
+
+SNAP_DIR = "snapshots"
+SNAP_KEEP = 7            # 每个文件保留最近几天的快照
+
+
+def snapshot(path, keep=SNAP_KEEP):
+    """覆盖前留一份"今天的第一版"快照。返回快照路径（没留就返回 None）。
+
+    存的是**写入之前**的内容，也就是今天动过之前的样子；每个文件每天只留一份，
+    保留最近 `keep` 天。原子写 + .bak 只能防"写到一半"，防不了"内容写错了"——
+    2026-09-26 那次误写把主文件和 .bak 一起污染了（.bak 是每次保存后立刻覆盖的），
+    当时只能从几十分钟前的整包备份里捞。有了这个就有真正的后悔药。
+
+    全程 best-effort：快照失败绝不能影响正常保存。
+    """
+    try:
+        if not path or not os.path.exists(path):
+            return None            # 第一次创建，没有"旧内容"可留
+        import datetime
+        d = os.path.join(os.path.dirname(path) or ".", SNAP_DIR)
+        base = os.path.basename(path)
+        stamp = datetime.date.today().strftime("%Y%m%d")
+        dst = os.path.join(d, "%s.%s" % (base, stamp))
+        if os.path.exists(dst):
+            return None            # 今天已经留过了
+        os.makedirs(d, exist_ok=True)
+        import shutil
+        shutil.copy2(path, dst)
+        _prune_snapshots(d, base, keep)
+        return dst
+    except Exception:
+        return None
+
+
+def _prune_snapshots(d, base, keep):
+    """只保留最近 keep 份（按文件名里的日期排，名字就是时间序）。"""
+    try:
+        olds = sorted(n for n in os.listdir(d)
+                      if n.startswith(base + ".") and n[len(base) + 1:].isdigit())
+        for n in olds[:max(0, len(olds) - int(keep))]:
+            try:
+                os.remove(os.path.join(d, n))
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def read_json(name, default=None):

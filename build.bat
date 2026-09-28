@@ -4,7 +4,8 @@ cd /d "%~dp0"
 setlocal
 
 REM ===== oi桌宠 打包脚本（版本号取自 module_core.APP_VERSION，不写死） =====
-REM   build.bat            产出便携单文件 + 安装包
+REM   build.bat            先跑全部自动化测试，全过才产出便携单文件 + 安装包
+REM   set OI_SKIP_TESTS=1  跳过测试闸门（应急用，正常别跳）
 REM 打包 venv 默认在 %LOCALAPPDATA%\oi-packenv；在别处时先 set PYENV=...\python.exe
 
 if not defined PYENV set "PYENV=%LOCALAPPDATA%\oi-packenv\Scripts\python.exe"
@@ -17,7 +18,18 @@ if not exist "%PYENV%" (
     exit /b 1
 )
 
-echo [1/5] Reading version and writing version_info.txt...
+echo [1/6] Running test suites (gate)...
+if defined OI_SKIP_TESTS (
+    echo         skipped by OI_SKIP_TESTS
+) else (
+    "%PYENV%" run_all_tests.py -q
+    if errorlevel 1 (
+        echo [ERROR] Tests failed - refusing to build. Fix them, or set OI_SKIP_TESTS=1 to override.
+        exit /b 1
+    )
+)
+
+echo [2/6] Reading version and writing version_info.txt...
 for /f %%v in ('"%PYENV%" _make_version.py') do set "VER=%%v"
 if not defined VER (
     echo Failed to read APP_VERSION.
@@ -25,27 +37,27 @@ if not defined VER (
 )
 echo         version = %VER%
 
-echo [2/5] Building portable single-file exe...
+echo [3/6] Building portable single-file exe...
 set "OI_ONEDIR="
 "%PYENV%" -m PyInstaller --noconfirm --clean --distpath build_out --workpath build oi_pet_v020.spec
 if errorlevel 1 exit /b 1
 if not exist dist mkdir dist
 move /Y "build_out\oi桌宠.exe" "dist\oi桌宠%VER%.exe" >nul
 
-echo [3/5] Building folder build for the installer...
+echo [4/6] Building folder build for the installer...
 set "OI_ONEDIR=1"
 "%PYENV%" -m PyInstaller --noconfirm --clean --distpath build_out --workpath build oi_pet_v020.spec
 if errorlevel 1 exit /b 1
 set "OI_ONEDIR="
 
-echo [4/5] Refreshing runtime data next to the portable exe...
+echo [5/6] Refreshing runtime data next to the portable exe...
 copy /Y config.yaml dist\config.yaml >nul
 copy /Y webchat_sites.json dist\webchat_sites.json >nul
 if exist dist\widgets rmdir /S /Q dist\widgets
 xcopy /E /I /Y widgets dist\widgets >nul
 if exist dist\widgets\__pycache__ rmdir /S /Q dist\widgets\__pycache__
 
-echo [5/5] Building installer...
+echo [6/6] Building installer...
 if not exist "%ISCC%" (
     echo [WARN] Inno Setup not found; skipped installer.
     goto done

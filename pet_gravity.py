@@ -890,6 +890,14 @@ def save_settings(settings: dict):
     with _SETTINGS_LOCK:
         tmp = None
         try:
+            # 覆盖前先留一份"今天的第一版"快照（保留 7 天）。原子写 + .bak 只能
+            # 防"写到一半"，防不了"内容写错了"——.bak 是每次保存后立刻刷新的，
+            # 一次误写就会连 .bak 一起污染（2026-09-26 那次就是）。
+            try:
+                import data_store as _ds
+                _ds.snapshot(path)
+            except Exception:
+                pass
             d = os.path.dirname(path) or "."
             # 不用 tempfile.mkstemp：目录不可写时它在 Windows 上会死循环，
             # 详见 data_store.make_temp_file 的说明

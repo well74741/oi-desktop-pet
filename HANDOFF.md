@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.14 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.15 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -101,19 +101,21 @@
 ## 5. 每次改动必须走的工作流
 
 1. 在工作区（= 运行目录）改代码
-2. 编译检查：`python -m py_compile <改动文件>`（或全量 `Get-ChildItem -Recurse -Filter *.py | python -m py_compile`）
-3. 发新版：改 `module_core.APP_VERSION`（小版本递增，别覆盖旧版本号），其余自动
-3. 跑测试：`python -u test_bubble.py`（64 项，必须全过）；组件缩放测试 `python -u test_components_scale.py`；
-   模板验证 `python -u test_templates.py`（111 项）；聚合AI/宿主嵌入 `python -u test_webchat.py`（54 项）；
-   桌宠倾角动画/空盘开合/悬停提示 `python -u test_pet_anim.py`（44 项）；
-   AI 改设置与设置窗一致性 `python -u test_settings_sync.py`（14 项）
-   （组件测试会真实渲染拼豆网格和共享图标，避免 paintEvent 静默失败）
-4. 重启桌宠：在当前工作区执行 `.\启动桌宠.bat`
-5. 备份：`python _make_backup.py`
-6. 需要发布 exe 时打包：`build.bat`（用 Python 3.12 venv + PyInstaller 6.21）；
-   （从 Git Bash 调 bat 时中文路径会乱码，要么在资源管理器/PowerShell 里双击运行，要么按脚本步骤手动执行）
+2. 编译检查：`python -m py_compile <改动文件>`
+3. **跑测试：`python run_all_tests.py`** —— 自动发现并跑完所有 `test_*.py`
+   （目前 8 个套件、约 10 秒），有一个不过就别往下走。
+   真实浏览器/几何的手动验证另算：`_check_host.py`、`_check_chatpanel.py`
+4. 发新版：改 `module_core.APP_VERSION`（小版本递增，别覆盖旧版本号），其余自动
+5. 重启桌宠：在当前工作区执行 `.\启动桌宠.bat`
+6. 打包：`build.bat`（Python 3.12 venv + PyInstaller 6.21）。
+   **脚本第一步就是测试闸门**：不全过直接拒绝出包（应急可 `set OI_SKIP_TESTS=1`）。
+   （从 Git Bash 调 bat 时中文路径会乱码，用
+   `subprocess.run(r'cmd /c .uild.bat', cwd=项目目录, env=去掉 NoDefaultCurrentDirectoryInExePath 的环境)`）
    dist 发布包要含 `widgets/`、`config.yaml`、`webchat_sites.json`（脚本已自动拷贝）
-7. `git add -A && git commit -m "..."`（**不要提交** pet_settings.json / chat_history.json / 各 *_data.json 等用户数据，.gitignore 已排除）
+7. 备份：`python _make_backup.py`（含用户数据，是最后一道后悔药）
+8. `git add -A && git commit -m "..."`（**不要提交**用户数据；
+   `.gitignore` 已排除 `pet_settings.json*`（含 .bak/快照）、`chat_history.json`、
+   各 `*_data.json`、`webchat_profile/`、备份 zip 与打包产物）
 
 ## 6. 功能地图（当前已实现）
 
@@ -164,6 +166,31 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.15：开机自启 + 稳定性三件套（版本控制 / 数据快照 / 测试闸门）2026-09-28】
+  - **开机自启**：新增 `autostart.py`（不依赖 Qt，便于单测），写当前用户的
+    `HKCU\...\CurrentVersion\Run`，不需要管理员权限。设置窗底部多一个
+    「开机自启」勾选框，**状态直接读注册表**、不在 settings 里另存一份
+    （两处存同一件事迟早不一致，0.9.12 就是这么出的问题）。
+    路径带引号（这个项目路径里有中文和空格，不带引号会被系统截断）；源码模式
+    用 pythonw，不弹控制台黑框。启动时 `autostart.refresh()` 自愈：开着自启但
+    登记的路径已经不是现在这份程序（便携版搬了家、装了新版本），悄悄改回来。
+    回归：`test_autostart.py`（19 项），**只在自己的沙箱注册表键里跑**，
+    跑前后都核对过真实 Run 键的条目数没变。
+  - **数据滚动快照**：`data_store.snapshot()` 在覆盖前留一份"今天的第一版"，
+    每个文件每天一份、保留 7 天，放在 `snapshots/`。`write_json_path()` 和
+    `pet_gravity.save_settings()` 都接了。原子写 + `.bak` 只能防"写到一半"，
+    防不了"内容写错"——`.bak` 是每次保存后立刻刷新的，2026-09-26 那次误写把
+    主文件和 `.bak` 一起污染了。快照失败绝不影响保存（best-effort）。
+    回归：`test_data_store.py`（13 项）。
+  - **一键测试 + 打包闸门**：新增 `run_all_tests.py`（自动发现 `test_*.py`，
+    各起子进程、每个套件独立沙箱 TEMP——不换 TEMP 会和用户正在跑的桌宠抢
+    `oi_pet.lock`，测试会静默退出）。`build.bat` 第一步就跑它，不全过拒绝出包
+    （`OI_SKIP_TESTS=1` 应急跳过）。实测：塞一个故意失败的套件进去，build.bat
+    退出码 1、打包没开始。
+  - **纳入 git**：首次提交 61 个文件。提交前查出 `.gitignore` 只写了
+    `pet_settings.json`、盖不住 `pet_settings.json.bak`（**里面有 API Key**），
+    已改成 `pet_settings.json*`，并补上 `*_data.json` 与 `snapshots/`。
 
 - 【v0.9.14：中文候选浮窗还是飘 —— 根因是跨进程 SetParent，改成顶层+owner 2026-09-27】
   - 0.9.13 只修了"浏览器缓存的屏幕坐标"，那确实是个真 bug，但**不是候选窗飘的
@@ -1387,12 +1414,15 @@ PyInstaller 6.21（打包）。
 ## 10. 常用命令速查
 
 ```powershell
+python run_all_tests.py                           # 一键跑完所有套件（打包闸门用的也是它）
 python -u test_bubble.py                          # 气泡/模块契约/模块行几何回归测试（64 项）
 python -u test_components_scale.py                 # 组件缩放回归测试
 python -u test_templates.py                        # 模块模板验证（111 项，新增模板必跑）
 python -u test_webchat.py                          # 聚合AI：站点/摆位/粘住网页窗口/切换不闪/输入法/打开入口（54 项）
 python -u test_pet_anim.py                         # 倾角动画 + 空菜单盘开合 + 提示排版 + 悬停提示（44 项）
 python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性（14 项，沙箱隔离）
+python -u test_autostart.py                        # 开机自启读写与自愈（19 项，沙箱注册表键）
+python -u test_data_store.py                       # 原子写 + 每日滚动快照（13 项）
 python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（23 项，临时 profile，跑完即删）
 python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位
 python _make_backup.py                            # 备份
