@@ -17,9 +17,7 @@ import data_store
 from widgets import ModuleWidget, kit
 from widgets import icons
 
-_PALETTE = ["#ff6b6b", "#ffa94d", "#ffd43b", "#69db7c", "#38d9a9",
-            "#4dabf7", "#9775fa", "#f783ac", "#ffffff", "#808080",
-            "#111111"]
+_PALETTE = kit.PALETTE   # 画布/拼豆共用一份（见 kit.PALETTE）
 
 _COLS = 11            # 列数
 _ROWS = 10            # 行数

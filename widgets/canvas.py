@@ -30,8 +30,7 @@ _FIX_W = 210          # 气泡固定宽（与 bubble_ui._FIX_W 一致）
 _RATIO = 3.0 / 4.0    # 画布 4:3
 _CANVAS_H = int(_FIX_W * _RATIO)   # 210 * 0.75 = 157
 
-_PALETTE = ["#ff6b6b", "#ffa94d", "#ffd43b", "#69db7c",
-            "#4dabf7", "#9775fa", "#f783ac", "#ffffff", "#111111"]
+_PALETTE = kit.PALETTE   # 画布/拼豆共用一份（见 kit.PALETTE）
 
 # 弹窗按钮统一规范（形状/尺寸来自 kit，确认/输入框共用）
 _BTN_QSS = kit.DIALOG_BTN_QSS
@@ -432,6 +431,9 @@ class Widget(ModuleWidget):
 
         self._build_bar()
         self._bar_visible = True
+        # 应用一次初始颜色：色块的选中描边和"当前颜色"预览框都靠它上色，
+        # 不调的话预览框一开始是块空白（拼豆那边也是构造完就设一次）
+        self._set_color(getattr(self, "_color", None) or _PALETTE[0])
 
         # 收纳后的三角按钮：独立悬浮在右上角，点它还原工具栏（与展开按钮同尺寸同风格）
         self._bar_tab = QPushButton("", self._expand)
@@ -497,11 +499,15 @@ class Widget(ModuleWidget):
         self._btn_paste.clicked.connect(self._paste)
         self._btn_del.clicked.connect(self._delete_selected)
         self._btn_clear.clicked.connect(self._clear_all)
-        # AI 按钮已经挪到标题行（和拼豆一致），工具栏里不再重复放一个——
-        # 这排本来就挤，按钮小得点不准。Ctrl+A 快捷键照旧。
         # 收纳工具栏：收起为右上角小三角按钮，再点还原（展开朝右/收纳朝左，风格一致）
         self._btn_bar_fold = self._b("", "收纳工具栏", False, ic("fold"))
         self._btn_bar_fold.clicked.connect(self._toggle_bar)
+        # 当前颜色预览：占掉按钮行剩下的横向空间（和拼豆工具栏一个样式）。
+        # 按钮不再被拉成长条，多出来的宽度交给它，一眼能看出在用什么颜色。
+        self._cur_color = QLabel("", self._bar_row1)
+        self._cur_color.setCursor(Qt.PointingHandCursor)
+        self._cur_color.setToolTip("当前颜色")
+        self._bar_row1_lay.addWidget(self._cur_color, 1)
         # 颜色（小色块）
         self._color_btns = []
         for c in _PALETTE:
@@ -541,6 +547,12 @@ class Widget(ModuleWidget):
     def _set_color(self, c):
         self._color = c
         self._view.pen_color = c
+        try:
+            self._cur_color.setStyleSheet(kit.scale_qss(
+                "QLabel{border:1px solid rgba(255,255,255,70);border-radius:3px;"
+                "background:%s;}" % c))
+        except Exception:
+            pass
         for cb, cc in zip(self._color_btns, _PALETTE):
             cb.setStyleSheet(kit.scale_qss(
                 "QPushButton{border:2px solid %s;border-radius:5px;background:%s;}"
@@ -605,33 +617,39 @@ class Widget(ModuleWidget):
                 pass
 
     def _fit_bar_btns(self, avail_w):
-        """工具按钮**拉伸填满工具栏宽度**（和拼豆一个路子），排不下才换行。
+        """按宽度定按钮尺寸/行数，并返回工具栏该有多宽。
 
         历程：最早是死的 `bubble_token("icon_button_*")`，气泡拉宽了按钮还是那么
-        小；改成按比例缩放之后，窄气泡下 9 个按钮挤成一堆小方块，比拼豆的还小
-        （用户反馈"为什么更小了，拼豆那种尺寸才是对的"）。拼豆的做法是按钮
-        `addWidget(b, 1)` 拉伸填满整行——这里照搬：工具栏占满画布宽度，每个按钮
-        分到 (可用宽 - 间距) / 每行个数。
-
-        只有在"每个按钮会瘦过基准尺寸"时才换行：那才是真的点不准。
+        小；改成按比例缩放后，窄气泡下 9 个按钮挤成一堆小方块，比拼豆的还小
+        （用户反馈"为什么更小了"）；再改成拉伸填满，宽画布上又被拉成长棍。
+        现在照拼豆的最终形态：**按钮到舒服的尺寸就不再长**（封在基准的 1.6 倍），
+        按钮行末尾挂一个"当前颜色"预览框吃掉剩下的宽度。
         """
         btns = getattr(self, "_bar_btns", None)
         if not btns:
-            return
+            return 0
         n = len(btns)
         base_w = kit.bubble_token("icon_button_width")
         base_h = kit.bubble_token("icon_button_height")
         m = self._bar_v.contentsMargins()
         sp = self._bar_row1_lay.spacing()
-        chrome = m.left() + m.right() + kit.bs(6)      # 6 = 工具栏距画布边缘
-        inner = max(base_w, int(avail_w) - chrome - self._side_slider_w())
-        # 一行放几个：先假设一行放得下，算算每个能有多宽；瘦过基准就多分几行
-        per_row = n
-        while per_row > 1 and (inner - sp * (per_row - 1)) / float(per_row) < base_w:
-            per_row -= 1
-        w = int(max(base_w, (inner - sp * (per_row - 1)) / float(per_row)))
-        # 上限：画布很宽时别把图标按钮拉成一条长棍，多余的宽度留白就好
-        w = min(w, int(base_w * 2.5))
+        edge = kit.bs(6)                       # 工具栏距画布右边缘
+        outer = max(base_w * 2,
+                    int(avail_w) - self._side_slider_w() - edge - 2)
+        inner = max(base_w, outer - m.left() - m.right())
+        prev_min = base_w * 2                  # 留给"当前颜色"预览框的最小宽度
+        room = max(base_w, inner - prev_min - sp)
+        # 行数取"能让每个按钮都不瘦过基准尺寸"的最小值，再把按钮**均分**到各行
+        # （9 个分 2 行是 5+4，不是 6+3；一行塞满另一行零星几个很难看）
+        rows_n = 1
+        while rows_n < n:
+            per = -(-n // rows_n)              # ceil
+            if (room - sp * (per - 1)) / float(per) >= base_w:
+                break
+            rows_n += 1
+        per_row = max(1, -(-n // rows_n))
+        w = int(max(base_w, (room - sp * (per_row - 1)) / float(per_row)))
+        w = min(w, int(base_w * 1.6))
         h = int(max(base_h, min(w * base_h / float(max(1, base_w)),
                                 base_h * 1.6)))
         icon = max(kit.bubble_token("icon"), int(min(w, h) * 0.78))
@@ -645,7 +663,13 @@ class Widget(ModuleWidget):
         if per_row != getattr(self, "_bar_per_row", None):
             self._bar_per_row = per_row
             self._reflow_bar_rows(per_row, h)
+        try:
+            self._cur_color.setFixedHeight(max(kit.bs(10), h - kit.bs(4)))
+            self._cur_color.setMinimumWidth(prev_min)
+        except Exception:
+            pass
         self._fit_bar_row2(inner, sp, h)
+        return outer
 
     def _fit_bar_row2(self, budget, sp, row_h):
         """颜色行：色块同样拉伸填满，不再和粗细滑条抢宽度。
@@ -690,6 +714,18 @@ class Widget(ModuleWidget):
                 b.setParent(host)
             host.layout().addWidget(b)
             b.show()
+        # "当前颜色"预览框永远挂在**最后一行**的末尾，吃掉剩余宽度
+        try:
+            last = rows[max(0, need - 1)]
+            old = self._cur_color.parent()
+            if old is not None and old.layout() is not None:
+                old.layout().removeWidget(self._cur_color)
+            if old is not last:
+                self._cur_color.setParent(last)
+            last.layout().addWidget(self._cur_color, 1)
+            self._cur_color.show()
+        except Exception:
+            pass
         for i, host in enumerate(rows):
             host.setVisible(i < need)
             if i < need:
@@ -716,9 +752,9 @@ class Widget(ModuleWidget):
     def _place_bar(self):
         w = self._expand.width()
         self._place_side_slider()
-        self._fit_bar_btns(w)
-        # 先把内部布局跑一遍再 adjustSize：不激活的话拿到的是**上一轮**的
-        # sizeHint，工具栏会按旧宽度摆位（实测拉宽画布时位置慢一拍）
+        bar_w = self._fit_bar_btns(w)
+        # 先把内部布局跑一遍再定尺寸：不激活的话拿到的是**上一轮**的 sizeHint，
+        # 工具栏会按旧宽度摆位（实测拉宽画布时位置慢一拍）
         for _r in getattr(self, "_bar_rows", [self._bar_row1]):
             if _r.layout() is not None:
                 _r.layout().activate()
@@ -726,6 +762,10 @@ class Widget(ModuleWidget):
             self._bar_row2.layout().activate()
         self._bar_v.activate()
         self._bar.adjustSize()
+        # 宽度取算出来的目标值，不用 sizeHint：颜色预览框是可伸缩的，
+        # sizeHint 只会给它最小宽度，于是那块空余永远填不满
+        if bar_w:
+            self._bar.resize(int(bar_w), self._bar.height())
         self._bar.move(max(self._side_slider_w() + 2,
                            w - self._bar.width() - kit.bs(4)), 4)
         self._bar.raise_()

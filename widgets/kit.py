@@ -593,6 +593,14 @@ def ghost_btn(text="", fixed_w=18, fixed_h=13, tip=""):
     return b
 
 
+# ==================== 画笔调色板（画布 / 拼豆共用一份） ====================
+# 两边各存一份的时候，画布只有 9 色、拼豆 11 色，看起来像两个不同的产品。
+# 值是拼豆那一套（用户认可的），画布跟过来——色值完全相同，不涉及存档迁移。
+PALETTE = ["#ff6b6b", "#ffa94d", "#ffd43b", "#69db7c", "#38d9a9",
+           "#4dabf7", "#9775fa", "#f783ac", "#ffffff", "#808080",
+           "#111111"]
+
+
 # ==================== 悬停提示（全局唯一一套） ====================
 # 提示框的样式**只准在这里定义一处**。以前设置窗一套深色、画布和另一个弹窗各自
 # 一套浅色、气泡里的模块行又什么都没写（于是吃系统调色板 ToolTipBase #ffffdc 那块
@@ -762,6 +770,28 @@ class DarkDialog(QDialog):
         except Exception:
             pass
 
+    def showEvent(self, event):
+        """兜底：任何深色弹窗显示时都夹进屏幕，绝不半个身子在屏幕外。
+
+        `_MsgDialog` 会另外把自己挪到操作区附近（见 place_near）；这里只保证
+        "整块可见"这条底线，不改变别的弹窗原本的位置策略。
+        """
+        super().showEvent(event)
+        try:
+            from PyQt5.QtWidgets import QApplication
+            g = self.frameGeometry()
+            scr = QApplication.screenAt(g.center()) or QApplication.primaryScreen()
+            av = scr.availableGeometry()
+            if av.contains(g):
+                return
+            w = max(g.width(), self.width())
+            h = max(g.height(), self.height())
+            x = max(av.left(), min(g.left(), av.left() + av.width() - w))
+            y = max(av.top(), min(g.top(), av.top() + av.height() - h))
+            self.move(int(x), int(y))
+        except Exception:
+            pass
+
     def add_help_button(self, callback, tip=""):
         """在标题栏显示「？」按钮（替代系统标题栏的 WhatsThis 按钮）。"""
         try:
@@ -787,6 +817,7 @@ class _MsgDialog(DarkDialog):
         # 置顶：否则可能被始终置顶的气泡/桌宠窗口盖住，看起来像"弹窗消失了"
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         self.setModal(True)
+        self._anchor = parent if isinstance(parent, QWidget) else None
         self._ok = False
         lay = QVBoxLayout(self.body)
         lay.setContentsMargins(16, 14, 16, 12)
@@ -836,26 +867,54 @@ class _MsgDialog(DarkDialog):
         self._ok = True
         self.accept()
 
+    def showEvent(self, event):
+        # 摆位必须在这里做，不能在构造后立刻做：弹窗要等 Polish 事件才按
+        # UI_BASE 放大（见下方"普通窗口统一放大"），构造完那会儿量到的是放大前
+        # 的尺寸，照那个尺寸算出来的居中位置是偏的。
+        super().showEvent(event)
+        place_near(self, self._anchor)
+
     def result_ok(self):
         return self._ok
 
 
-def _show_msg(parent, title, text, confirm_mode=False, danger=False):
-    dlg = _MsgDialog(parent, title, text, confirm_mode, danger)
-    dlg.adjustSize()
+def place_near(dlg, anchor=None):
+    """把弹窗摆在操作区附近，并**保证整块都在屏幕内**。
+
+    以前 `_show_msg` 只做"居中到父窗口"，没有任何屏幕钳制：气泡贴在屏幕左边时，
+    以气泡里的组件为中心一摆，弹窗就有一半跑到屏幕外（用户反馈"清空的提示窗
+    飞到屏幕外了，有一半看不到"）。
+
+    `anchor` 是发起操作的控件；取不到就用鼠标位置——总之落在用户正在看的地方，
+    而不是主屏中央。
+    """
+    from PyQt5.QtGui import QCursor
+    from PyQt5.QtWidgets import QApplication
     try:
-        # 居中到父窗口（无父窗口则居中到其所在屏幕）
-        from PyQt5.QtWidgets import QApplication
-        if isinstance(parent, QWidget) and parent.isVisible():
-            c = parent.frameGeometry().center()
+        if isinstance(anchor, QWidget) and anchor.isVisible():
+            c = anchor.mapToGlobal(anchor.rect().center())
         else:
-            c = QApplication.primaryScreen().availableGeometry().center()
+            c = QCursor.pos()
+        scr = QApplication.screenAt(c) or QApplication.primaryScreen()
+        av = scr.availableGeometry()
         g = dlg.frameGeometry()
-        g.moveCenter(c)
-        dlg.move(g.topLeft())
+        # 与 size() 取大：窗口还没显示过时 frameGeometry 会比实际小 1px
+        # （实测 320x180 的窗口报 319x179），夹完正好露出一条边
+        w, h = max(g.width(), dlg.width()), max(g.height(), dlg.height())
+        # 直接算坐标，不用 QRect.moveRight/moveBottom：那两个按"右边界是
+        # 最后一个像素"的含义算，和 availableGeometry().right() 一起用差 1px，
+        # 夹完还是会露出一条边（实测贴右下角时正好多出 1px）。
+        # max 放在外层：窗口比屏幕还大时以左上为准，至少标题栏和按钮能点到。
+        x = max(av.left(), min(c.x() - w // 2, av.left() + av.width() - w))
+        y = max(av.top(), min(c.y() - h // 2, av.top() + av.height() - h))
+        dlg.move(int(x), int(y))
     except Exception:
         pass
-    dlg.exec_()
+
+
+def _show_msg(parent, title, text, confirm_mode=False, danger=False):
+    dlg = _MsgDialog(parent, title, text, confirm_mode, danger)
+    dlg.exec_()          # 摆位在 _MsgDialog.showEvent 里做（那时尺寸才是最终的）
     return dlg.result_ok()
 
 

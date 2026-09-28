@@ -280,6 +280,78 @@ else:
 
 kit.set_bubble_scale(1.0)
 
+# ---------- 弹窗必须整块在屏幕内，而且落在操作区附近 ----------
+# 回归：_show_msg 只做"居中到父窗口"，没有任何屏幕钳制。气泡贴在屏幕左边时，
+# 以气泡里的组件为中心一摆，弹窗就有一半跑到屏幕外（用户反馈"清空的提示窗
+# 飞到屏幕外了，有一半看不到"）。
+_av = app.primaryScreen().availableGeometry()
+_anchor = QWidget()
+_anchor.resize(40, 20)
+_anchor.show()
+app.processEvents()
+_dlg_cases = []
+for _name, _ax, _ay in (("贴左上角", _av.left(), _av.top()),
+                        ("贴右下角", _av.right() - 40, _av.bottom() - 20),
+                        ("贴左边中间", _av.left(), _av.center().y()),
+                        ("屏幕中央", _av.center().x(), _av.center().y())):
+    _anchor.move(_ax, _ay)
+    app.processEvents()
+    _d = QWidget()
+    _d.resize(320, 180)
+    kit.place_near(_d, _anchor)
+    _g = _d.frameGeometry()
+    _dlg_cases.append((_name, _av.contains(_g),
+                       (_g.center() - _anchor.frameGeometry().center()).manhattanLength()))
+    _d.deleteLater()
+_off = [c[0] for c in _dlg_cases if not c[1]]
+check("弹窗：任何位置都整块在屏幕内（不会露出去一半）", not _off,
+      "跑出去的：%s" % (_off,))
+check("弹窗：落在操作区附近（离锚点不超过半个屏幕）",
+      all(c[2] <= (_av.width() + _av.height()) // 2 for c in _dlg_cases),
+      "%s" % ([(c[0], c[2]) for c in _dlg_cases],))
+_anchor.deleteLater()
+check("弹窗：摆位在 showEvent 里做（构造时还没按 UI_BASE 放大，尺寸是旧的）",
+      "def showEvent" in open(
+          os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "widgets", "kit.py"), encoding="utf-8").read())
+
+# ---------- 画布 / 拼豆：同一套调色板 + 当前颜色预览框 ----------
+_cv2, _ = load_module_widget("canvas")
+_pl2, _ = load_module_widget("perler")
+if _cv2 is None or _pl2 is None:
+    check("调色板：组件能加载", False)
+else:
+    _pl2.resize(300, 200)
+    _pl2.show()
+    _pl2._toggle_fold()
+    _cv2.resize(360, 260)
+    _cv2.show()
+    _cv2._toggle_fold()
+    app.processEvents()
+    check("调色板：画布和拼豆用同一份（都来自 kit.PALETTE，%d 色）"
+          % len(kit.PALETTE),
+          len(_cv2._color_btns) == len(_pl2._color_btns) == len(kit.PALETTE))
+    check("画布：工具栏有「当前颜色」预览框，且一开始就上了色",
+          hasattr(_cv2, "_cur_color")
+          and "background" in _cv2._cur_color.styleSheet())
+    _cv2._expand.resize(360, 240)
+    _cv2._place_bar()
+    app.processEvents()
+    _w_narrow = _cv2._cur_color.width()
+    _cv2.resize(640, 260)
+    _cv2._expand.resize(640, 240)
+    _cv2._place_bar()
+    app.processEvents()
+    check("画布：预览框吃掉按钮行多出来的宽度（%d -> %d px）"
+          % (_w_narrow, _cv2._cur_color.width()),
+          _cv2._cur_color.width() > _w_narrow)
+    check("画布：按钮不会被拉成长棍（封在基准的 1.6 倍内，实测 %d px）"
+          % _cv2._bar_btns[0].width(),
+          _cv2._bar_btns[0].width()
+          <= int(kit.bubble_token("icon_button_width") * 1.6) + 1)
+    _cv2.close()
+    _pl2.close()
+
 # ---------- 行高预算：与字体无关的公式不变式 ----------
 # 卡片上下各调一次 bs(1)，bs() 每次取整；行高预算若用 bs(2) 会差 1px，
 # 那正是 v0.9.10 "文字偏低出框" 的根因。

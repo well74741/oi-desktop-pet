@@ -7634,13 +7634,25 @@ class GravityPet(QWidget):
             traceback.print_exc()
 
     def _toggle_bubble(self):
-        """右键菜单：打开/关闭状态气泡（立即生效并保存）。"""
+        """右键菜单：打开/关闭状态气泡（立即生效并保存）。
+
+        关闭时必须先解掉「气泡保持」（钉住）：`hide_animated()` 一看到 `_pinned`
+        就直接 return，于是"开了气泡保持之后点关闭气泡没反应"（用户反馈）。
+        关闭气泡是更强的意图，它应当压过保持状态，任何时候都生效。
+        """
         try:
             self.bubble_enabled = not self.bubble_enabled
             self.settings["bubble_enabled"] = self.bubble_enabled
             save_settings(self.settings)
+            b = getattr(self, "status_bubble", None)
             if not self.bubble_enabled:
-                self.status_bubble.hide_animated()
+                if b is not None and getattr(b, "_pinned", False):
+                    b.unpin()
+                if b is not None:
+                    b.hide_animated()
+            elif b is not None and self._cursor_over_pet():
+                # 重新打开时鼠标还停在桌宠上：立刻弹出来，不用挪开再移回去
+                b._do_show()
         except Exception:
             import traceback
             traceback.print_exc()

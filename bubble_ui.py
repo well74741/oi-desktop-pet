@@ -2153,11 +2153,19 @@ class StatusBubble(QWidget):
             self._hide_timer.stop()
         self.update()
 
+    def unpin(self):
+        """解除钉住（气泡保持）。唯一一处改 `_pinned=False` 并同步按钮外观的地方，
+        免得每个调用点各写一份、漏掉按钮上的 ●/○。"""
+        if not self._pinned:
+            return
+        self._pinned = False
+        self._pin_btn.setText("○")
+        self._pin_btn.setToolTip("钉住气泡（一直显示并跟随桌宠）")
+        self.update()
+
     def _close_bubble(self):
         """关闭气泡（=收起），同时解除钉住"""
-        if self._pinned:
-            self._pinned = False
-            self._pin_btn.setText("○")
+        self.unpin()
         self._auto_hide_timer.stop()
         self._hide_timer.stop()
         # 关闭后抑制悬停重弹：光标需离开桌宠再回来才会再次弹出

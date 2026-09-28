@@ -606,6 +606,24 @@ _cb._relayout()
 app.processEvents()
 check("分列：行变少会收回单列", _cb._ncols == 1 and _cb.width() == _cb._FIX_W)
 
+# 列高要**均摊**：只按"撞到屏幕高度才换列"装的话，第一列顶到屏幕底、第二列只剩
+# 零星几个，短列下面拖着一大片空白（用户反馈"这么大空间很浪费"）。
+for _n in (22, 30, 45):
+    _cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(_n)]
+    _cb._relayout()
+    app.processEvents()
+    _hs = [p[3] for p in _cb._col_panels]
+    check("分列均摊(%d 个模块)：各列高度接近（%s，差 %d px）"
+          % (_n, _hs, max(_hs) - min(_hs)),
+          len(_hs) >= 2 and (max(_hs) - min(_hs)) <= max(_hs) * 0.25)
+    check("分列均摊(%d 个模块)：没有因为均摊而多开一列（%d 列）"
+          % (_n, _cb._ncols),
+          _cb._ncols == len(_cb._split_columns(
+              [w for w in _cb._row_widgets if bubble_layout._w_is_alive(w)])))
+_cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(4)]
+_cb._relayout()
+app.processEvents()
+
 # 多列时每列是**独立一块背景**、各自按内容长短：一整块大背景会让只放一个模块
 # 的第二列下面拖着一大片空白
 _cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(10)]
@@ -615,7 +633,16 @@ app.processEvents()
 _p = _cb._col_panels
 check("分列背景：一列一块，不是一整块", len(_p) == _cb._ncols == 2)
 check("分列背景：两块紧贴（第二块起点 = 第一块右缘）", _p[1][0] == _p[0][2])
-check("分列背景：短的那列明显更短（长度自适应）", _p[1][3] < _p[0][3] - 40)
+# 每块面板的高度必须正好包住**自己那一列**的行，而不是统一取最高列的高度
+# （原先这里断言"短的那列明显更短"，那是在断言分列不均摊的旧行为；列高均摊之后
+# 两列本来就一样高，真正该守的不变式是"面板贴合自己列的内容"）。
+_col_bottoms = []
+for _pi, (_px, _py, _pw, _ph) in enumerate(_p):
+    _rows_in = [_cb._row_rect(w) for w in _cb._row_widgets
+                if _px <= _cb._row_rect(w).left() < _px + _pw]
+    _col_bottoms.append((_ph, max((r.bottom() for r in _rows_in), default=0)))
+check("分列背景：每块面板正好包住自己那列的内容（%s）" % (_col_bottoms,),
+      all(0 <= ph - bot <= 12 for ph, bot in _col_bottoms))
 check("分列背景：窗口高度 = 最高那列", _cb._full_h == max(x[3] for x in _p))
 check("分列背景：每行都落在自己那块板子里",
       all(any(px <= r.left() and r.right() <= px + pw and r.bottom() <= py + ph
@@ -852,6 +879,35 @@ check("拖气泡移桌宠：和直接拖桌宠用的是同一套钳制/吸附（
       and "_check_edge_snap" in open(
           os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "bubble_layout.py"), encoding="utf-8").read())
+
+# ---------- 「气泡保持」开着时，「关闭气泡」也必须管用 ----------
+# 回归：hide_animated() 一看到 _pinned 就 return，于是开了气泡保持之后点
+# 关闭气泡毫无反应（用户反馈）。关闭是更强的意图，应当压过保持状态。
+_pet.recenter()
+app.processEvents()
+_bub._do_show()
+app.processEvents()
+_pet._toggle_bubble_keep()                 # = 气泡保持（钉住）
+app.processEvents()
+check("气泡保持：打开后气泡是钉住态", _bub._pinned)
+check("气泡保持：钉住时单独调 hide_animated 确实不该隐藏（原有行为）",
+      (_bub.hide_animated() or True) and _bub._pinned)
+_pet._toggle_bubble()                       # = 关闭气泡
+app.processEvents()
+_dl = time.time() + 2
+while time.time() < _dl and _bub.isVisible():
+    app.processEvents()
+    time.sleep(0.02)
+check("气泡保持中点「关闭气泡」：钉住被解除", not _bub._pinned)
+check("气泡保持中点「关闭气泡」：气泡真的收起来了", not _bub.isVisible())
+check("气泡保持中点「关闭气泡」：钉住按钮的图标也跟着复位",
+      _bub._pin_btn.text() == "○")
+check("关闭气泡后设置里记下了", _pet.settings.get("bubble_enabled") is False)
+_pet._toggle_bubble()                       # 再打开
+app.processEvents()
+check("再点「打开气泡」：开关状态恢复",
+      _pet.bubble_enabled and _pet.settings.get("bubble_enabled") is True)
+
 try:
     _pet.close()
 except Exception:

@@ -648,26 +648,53 @@ class StatusBubbleLayout(StatusBubble):
         return max(10, int(w.minimumHeight()))
 
     def _split_columns(self, wraps):
-        """把行按顺序切成若干列，每列不超过 _max_col_h()。返回 [[行, ...], ...]。
+        """把行按顺序切成若干列，返回 [[行, ...], ...]。
 
-        贪心按顺序装：模块的相对顺序保持不变（用户拖拽排的序不能被打乱），
-        装不下就开下一列。单行本身就超高（比如展开的大组件）时它独占一列。
+        两步：
+        1) 先按"一列最多多高"（屏幕可用高度）贪心装一遍，确定**需要几列**；
+        2) 列数定下来之后，二分找"仍然只要这么多列"的最小列高，把高度均摊开。
+
+        只做第 1 步的话，第一列会一直顶到屏幕底，第二列只剩零星几个模块，
+        短列下面拖着一大片空白（用户反馈"这么大空间很浪费"）。均摊之后两列
+        高度接近，整个气泡矮一大截。
+
+        模块的相对顺序始终不变（用户拖拽排的序不能被打乱）；单行本身就超高
+        （比如展开的大组件）时它独占一列。
         """
         limit = self._max_col_h()
         m = self._vbox.contentsMargins()
         pad = m.top() + m.bottom() + _kit_sc_b(4)
         gap = self._vbox.spacing()
-        cols, cur, cur_h = [], [], pad
-        for w in wraps:
-            h = self._row_h(w)
-            if cur and cur_h + gap + h > limit:
+
+        def pack(h_limit):
+            cols, cur, cur_h = [], [], pad
+            for w in wraps:
+                h = self._row_h(w)
+                if cur and cur_h + gap + h > h_limit:
+                    cols.append(cur)
+                    cur, cur_h = [], pad
+                cur_h += h + (gap if cur else 0)
+                cur.append(w)
+            if cur or not cols:
                 cols.append(cur)
-                cur, cur_h = [], pad
-            cur_h += h + (gap if cur else 0)
-            cur.append(w)
-        if cur or not cols:
-            cols.append(cur)
-        return cols
+            return cols
+
+        cols = pack(limit)
+        n_cols = len(cols)
+        if n_cols <= 1 or not wraps:
+            return cols
+        # 下界是"最高的那一行"——比它还矮的列高装不下那一行，二分会白跑
+        lo = max(self._row_h(w) for w in wraps) + pad
+        hi = limit
+        best = cols
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            c = pack(mid)
+            if len(c) <= n_cols:
+                best, hi = c, mid - 1
+            else:
+                lo = mid + 1
+        return best
 
     def _groups_sig(self, groups):
         return [[id(w) for w in g] for g in groups]
