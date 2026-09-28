@@ -1,0 +1,30 @@
+[
+ {
+  "name": "DeepSeek",
+  "url": "https://chat.deepseek.com"
+ },
+ {
+  "name": "Kimi",
+  "url": "https://www.kimi.com/"
+ },
+ {
+  "name": "豆包",
+  "url": "https://www.doubao.com/chat/"
+ },
+ {
+  "name": "通义千问",
+  "url": "https://www.qianwen.com/"
+ },
+ {
+  "name": "文心一言",
+  "url": "https://yiyan.baidu.com/"
+ },
+ {
+  "name": "腾讯元宝",
+  "url": "https://yuanbao.tencent.com/chat"
+ },
+ {
+  "name": "讯飞星火",
+  "url": "https://xinghuo.xfyun.cn/desk"
+ }
+]

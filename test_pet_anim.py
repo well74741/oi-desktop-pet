@@ -1,0 +1,311 @@
+# -*- coding: utf-8 -*-
+"""桌宠倾角动画 + 设置窗悬停提示的回归测试。
+
+倾角部分回归的是两个真实 bug：
+1) 拖动开始时代码直接把倾角写 0，下一帧角度就从 25° 掉成 0°——一帧切；
+2) 吸附时长只有 0.1s，且用 ease_out_back（30% 的时间走完 90% 的角度），
+   60fps 下单帧要转 15°，同样看不出运动。
+所以这里量的是**每帧转多少度**，不是"有没有动画"。
+
+提示部分回归的是「模块列表」标题同时弹两个 tooltip（一个黄底一个深色）。
+
+运行：python test_pet_anim.py（离屏，不创建桌宠本体，只驱动倾角补间；
+设置窗用空配置构造，不读写 pet_settings.json）。
+"""
+import math
+import os
+import sys
+import time
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from PyQt5.QtCore import QElapsedTimer
+from PyQt5.QtWidgets import QApplication
+
+app = QApplication([])
+
+import pet_gravity as G
+
+PASS, FAIL = [], []
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def check(name, cond, extra=""):
+    (PASS if cond else FAIL).append(name)
+    print(("PASS " if cond else "FAIL ") + name + ("  " + extra if extra else ""))
+
+
+class Rotor(object):
+    """只带倾角状态的替身：把 GravityPet 的两个方法绑上来驱动。
+
+    桌宠本体要托盘、定时器、气泡一整套，测倾角用不着；补间逻辑本身是
+    自包含的（只读写下面这几个字段）。
+    """
+
+    def __init__(self):
+        self._current_rotation = 0.0
+        self._rest_rotation = 0.0
+        self._snap_rotation = 0.0
+        self._rot_from = 0.0
+        self._rot_to = 0.0
+        self._rot_dur = 0.0
+        self._rot_overshoot = True
+        self._rot_active = False
+        self._rot_timer = QElapsedTimer()
+
+    start = G.GravityPet._start_rot_anim
+    step = G.GravityPet._step_rotation
+
+
+def curve(ease, duration, span=G.EDGE_TILT_ANGLE, fps_ms=G.FRAME_MS_BUSY):
+    """按理想 60fps 采样一条缓动曲线，返回每帧角度。
+
+    用解析采样而不是真 sleep：真 sleep 的抖动会让"每帧转多少度"这个指标
+    忽大忽小，测出来的是机器负载，不是缓动曲线。
+    """
+    n = max(1, int(round(duration * 1000.0 / fps_ms)))
+    return [ease(i / float(n)) * span for i in range(n + 1)]
+
+
+def steps(angles):
+    return [abs(angles[i + 1] - angles[i]) for i in range(len(angles) - 1)]
+
+
+# ---------- 1. 缓动曲线：每帧只能转一点点，且要转很多帧 ----------
+for tag, dur in (("吸附倾倒", G.SNAP_ROT_DURATION),
+                 ("拔离回正", G.UNSNAP_ROT_DURATION)):
+    ang = curve(G.ease_tilt, dur)
+    d = steps(ang)
+    moving = sum(1 for x in d if x > 0.2)
+    check("%s：单帧最多转 %.2f°（不超过 4°才谈得上过渡）" % (tag, max(d)),
+          max(d) <= 4.0, "%.2fs / %d 帧" % (dur, len(d)))
+    check("%s：至少 10 帧在动（看得见的运动，又不拖沓）" % tag,
+          moving >= 10, "在动的帧 %d / 共 %d" % (moving, len(d)))
+    check("%s：末尾精确落在目标角度" % tag, abs(ang[-1] - G.EDGE_TILT_ANGLE) < 1e-9)
+    check("%s：末段有一点过冲再落回（有弹性，但别过头）" % tag,
+          0.3 < max(ang) - G.EDGE_TILT_ANGLE < 3.0,
+          "过冲 %.2f°" % (max(ang) - G.EDGE_TILT_ANGLE))
+
+# 回归：旧的 ease_out_back + 0.1s 就是用户看到的"一帧切"，留在这儿做对照
+old = steps(curve(G.ease_out_back, 0.10))
+check("对照：旧曲线单帧要转 %.1f°（这就是被吐槽的一帧切）" % max(old),
+      max(old) > 10.0)
+check("时长：够快，倾倒不超过 0.25s（用户要求比上一版快一倍）",
+      G.SNAP_ROT_DURATION <= 0.25 and G.UNSNAP_ROT_DURATION <= 0.25,
+      "倾倒 %.2fs / 回正 %.2fs" % (G.SNAP_ROT_DURATION, G.UNSNAP_ROT_DURATION))
+check("时长：倾角比位移长（先滑到边上、再倒过去）",
+      G.SNAP_ROT_DURATION > G.SNAP_MOVE_DURATION,
+      "旋转 %.2fs / 位移 %.2fs" % (G.SNAP_ROT_DURATION, G.SNAP_MOVE_DURATION))
+
+# ---------- 2. 吸附：0° → 25°，第一帧不许到位 ----------
+r = Rotor()
+r._snap_rotation = G.EDGE_TILT_ANGLE
+r.start(G.EDGE_TILT_ANGLE, G.SNAP_ROT_DURATION)
+check("吸附：补间被激活", r._rot_active is True)
+check("吸附：第一帧几乎没动（不是一帧切）",
+      abs(r.step(0.0)) < 2.0, "第一帧 %.2f°" % r._rest_rotation)
+time.sleep(G.SNAP_ROT_DURATION * 0.5)
+half = r.step(0.0)
+check("吸附：半程时在中间某个角度上", 3.0 < abs(half) < G.EDGE_TILT_ANGLE - 3.0,
+      "半程 %.2f°" % half)
+check("吸附：半程时补间还在跑（没提前结束）", r._rot_active is True)
+time.sleep(G.SNAP_ROT_DURATION * 0.6)
+r.step(0.0)
+check("吸附：结束时精确落在目标角度，且补间自己停掉",
+      abs(r._rest_rotation - G.EDGE_TILT_ANGLE) < 1e-9
+      and r._rot_active is False, "%.6f°" % r._rest_rotation)
+
+# ---------- 3. 拔离：25° → 0°，第一帧还得是倾斜的 ----------
+r = Rotor()
+r._rest_rotation = r._snap_rotation = G.EDGE_TILT_ANGLE
+r.start(0.0, G.UNSNAP_ROT_DURATION)
+r._snap_rotation = 0.0          # 和 mouseMoveEvent 里的顺序一致
+check("拔离：第一帧还保持着倾斜（不是一帧归零）",
+      abs(r.step(0.0) - G.EDGE_TILT_ANGLE) < 2.0,
+      "第一帧 %.2f°" % r._rest_rotation)
+time.sleep(G.UNSNAP_ROT_DURATION * 0.5)
+half = r.step(0.0)
+check("拔离：半程时立到一半", 3.0 < abs(half) < G.EDGE_TILT_ANGLE - 3.0,
+      "半程 %.2f°" % half)
+time.sleep(G.UNSNAP_ROT_DURATION * 0.6)
+r.step(0.0)
+check("拔离：结束时归零且补间停掉",
+      abs(r._rest_rotation) < 1e-9 and r._rot_active is False)
+
+# ---------- 4. 关掉过冲时不许越过目标 ----------
+no_over = curve(G.smoothstep, 0.3, span=10.0)
+check("过冲：关掉时曲线单调不越界（ease=smoothstep）",
+      max(no_over) <= 10.0 + 1e-9
+      and all(no_over[i + 1] >= no_over[i] for i in range(len(no_over) - 1)))
+
+# ---------- 5. 静止时跟着 _snap_rotation，呼吸叠在上面 ----------
+r = Rotor()
+r._snap_rotation = -G.EDGE_TILT_ANGLE
+check("静止：没有补间时倾角就是吸附角",
+      abs(r.step(0.0) + G.EDGE_TILT_ANGLE) < 1e-9)
+check("静止：呼吸叠加在吸附角之上（贴边也还在呼吸）",
+      abs(r.step(1.5) - (-G.EDGE_TILT_ANGLE + 1.5)) < 1e-9)
+r = Rotor()
+r._rest_rotation = 10.0
+r._snap_rotation = 10.0
+r.start(0.0, G.UNSNAP_ROT_DURATION)
+check("补间期间呼吸也照叠（结束那帧不会因为突然加呼吸而跳一下）",
+      abs(r.step(1.5) - (r._rest_rotation + 1.5)) < 1e-9)
+
+# ---------- 6. 目标没变化时不空跑一段补间 ----------
+r = Rotor()
+r._rest_rotation = 0.0
+r.start(0.0, G.SNAP_ROT_DURATION)
+check("同角度：目标和当前一致就不开补间", r._rot_active is False)
+
+# ---------- 7. 位移完成判定：必须用未缓动的进度 ----------
+# ease_out_back 中途会冲过 1.0，拿缓动值判 >=1 会让吸附位移在 60% 处就停在
+# 过冲的位置上（桌宠停在比目标更靠外的地方）。
+peak = max(G.ease_out_back(t / 100.0) for t in range(101))
+check("位移：ease_out_back 中途确实会超过 1.0（所以只能用原始进度判完成）",
+      peak > 1.0, "峰值 %.3f" % peak)
+src = open(os.path.join(HERE, "pet_gravity.py"), encoding="utf-8").read()
+pet = src[src.index("class GravityPet"):]
+snap_blk = pet[pet.index("if self.anim_type == \"snap\":"):]
+snap_blk = snap_blk[:snap_blk.index("_step_rotation")]
+check("位移：吸附位移拿原始进度 raw 判完成，不是拿缓动值",
+      "if raw >= 1.0:" in snap_blk and "if t_snap >= 1.0" not in snap_blk)
+
+# ---------- 8. 倾角只走补间这一条路 ----------
+body = pet[pet.index("def mouseMoveEvent"):pet.index("def contextMenuEvent")]
+check("回归：拖拽/松手里不再直接写 _current_rotation（那就是一帧切）",
+      "_current_rotation =" not in body)
+check("回归：拖拽开始处调的是补间", "_start_rot_anim(0.0" in body)
+check("回归：_snap_rotation 归零之前先起了回正补间",
+      body.index("_start_rot_anim(0.0") < body.index("self._snap_rotation = 0.0"))
+check("回归：倾角补间也算「忙」，帧率不会掉到 30fps",
+      "_rot_active" in pet[pet.index("def _frame_is_busy"):
+                           pet.index("def _request_paint")])
+
+# ---------- 9. 模块列表标题：悬停只弹一个提示，而且是深色那个 ----------
+# 以前标题同时挂了 setToolTip（Qt 延迟原生提示）和 eventFilter 里的
+# QToolTip.showText（即时），先后各弹一个；而 showText 不传控件时用的是系统
+# 调色板 ToolTipBase(#ffffdc)，就是用户看到的那块黄底。
+from PyQt5.QtCore import QEvent                                  # noqa: E402
+from PyQt5.QtWidgets import QToolTip                              # noqa: E402
+
+dlg = G.SettingsDialog({})       # 空配置：绝不读写用户的 pet_settings.json
+title = dlg._rules_title_label
+check("提示：标题不再挂原生 tooltip（否则会再弹第二个）",
+      title.toolTip() == "", "toolTip=%r" % title.toolTip())
+_shown = []
+_real_show = QToolTip.showText
+QToolTip.showText = staticmethod(lambda *a, **k: _shown.append(a))
+try:
+    dlg.eventFilter(title, QEvent(QEvent.Enter))
+finally:
+    QToolTip.showText = _real_show
+check("提示：悬停时只弹一个，且弹的是自己那条即时提示", len(_shown) == 1)
+check("提示：showText 传了控件（才能吃到设置窗的深色 QToolTip 样式，不是黄底）",
+      bool(_shown) and len(_shown[0]) >= 3 and _shown[0][2] is title,
+      "参数 %d 个" % (len(_shown[0]) if _shown else 0))
+qss = dlg.styleSheet()
+tip_rule = qss[qss.index("QToolTip"):qss.index("QToolTip") + 60]
+check("提示：设置窗的 QToolTip 规则是深色的", "#232a3a" in tip_rule,
+      tip_rule.replace("\n", " ").strip())
+dlg.deleteLater()
+
+# ---------- 10. 空菜单盘：开合动画要和有按钮时一样收得干净 ----------
+# 回归：完成判定原先看 `_sector_scale >= 0.999`，而 ease_out_back 中途会冲到
+# 1.045；空盘没有按钮陪跑（all_done 恒为 True），于是在过冲峰值上就收工、
+# 定时器停掉，盘子永久停在比最终尺寸大 4.5% 的地方——这就是"看着生硬"。
+from PyQt5.QtGui import QFont, QFontMetrics                        # noqa: E402
+
+pet_w = G.GravityPet({})
+pet_w.show()
+app.processEvents()
+menu = pet_w.radial_menu
+
+
+def run_menu(shortcuts, seconds=0.75):
+    menu.show_menu(shortcuts)
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < seconds:
+        app.processEvents()
+        time.sleep(0.016)
+    opened = (round(menu._sector_scale, 4), menu._animating)
+    menu.hide_menu()
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < seconds:
+        app.processEvents()
+        time.sleep(0.016)
+    return opened, (round(menu._sector_scale, 4), menu._animating,
+                    menu.isVisible())
+
+
+SC = [{"name": "a", "path": r"C:\Windows\notepad.exe"}] * 4
+for tag, sc in (("空盘", []), ("有按钮", SC)):
+    op, cl = run_menu(sc)
+    check("%s：展开到位后盘面精确停在 1.0（不卡在过冲上）" % tag,
+          op == (1.0, False), "scale=%s animating=%s" % op)
+    check("%s：收起后盘面精确归零且窗口收掉" % tag,
+          cl == (0.0, False, False), "scale=%s animating=%s visible=%s" % cl)
+
+# 提示文字排版：屏内 / 不被桌宠压住 / 不超出盘沿，放不下就竖排
+_f = QFont("Microsoft YaHei")
+_f.setPointSizeF(9 * G._kit.pet_k())
+_fm = QFontMetrics(_f)
+scr = G._virtual_geo()
+SPOTS = [("居中", scr.center().x(), scr.center().y()),
+         ("吸附上", scr.center().x(), scr.top() - 30),
+         ("吸附左", scr.left() - 30, scr.center().y()),
+         ("吸附右", scr.right() + 30, scr.center().y()),
+         ("吸附下", scr.center().x(), scr.bottom() + 30)]
+# 桌宠摆到屏幕外的坐标上量，别在用户桌面中央闪一下
+bad_scr, bad_pet, bad_disk, vertical = [], [], [], []
+off_axis = []
+for tag, gx, gy in SPOTS:
+    pet_w.move(gx - pet_w.width() // 2, gy - pet_w.height() // 2)
+    app.processEvents()
+    menu.show_menu([])
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 0.55:
+        app.processEvents()
+        time.sleep(0.016)
+    full = menu._sector_outer_full()
+    lines, lw, lh, tx, ty = menu._empty_hint_layout(full, _fm)
+    cx, cy = menu._center_pos.x(), menu._center_pos.y()
+    bh = lh * len(lines)
+    x, y = tx - lw / 2.0, ty - bh / 2.0
+    far = max(math.hypot(qx - cx, qy - cy) for qx, qy in
+              ((x, y), (x + lw, y), (x, y + bh), (x + lw, y + bh)))
+    ph = pet_w.pet_size * 0.5 + 2
+    org = menu.mapToGlobal(G.QPoint(0, 0))
+    if not (scr.left() <= org.x() + x and org.x() + x + lw <= scr.right()
+            and scr.top() <= org.y() + y and org.y() + y + bh <= scr.bottom()):
+        bad_scr.append(tag)
+    if not (x + lw < cx - ph or x > cx + ph
+            or y + bh < cy - ph or y > cy + ph):
+        bad_pet.append(tag)
+    if far > full - 3:
+        bad_disk.append((tag, round(far - full)))
+    if len(lines) > 1:
+        vertical.append(tag)
+    # 必须落在桌宠的正中轴线上：正下 / 正上 / 正右 / 正左，不许歪着
+    if min(abs(tx - cx), abs(ty - cy)) > 1.0:
+        off_axis.append((tag, round(tx - cx), round(ty - cy)))
+    menu.hide_menu(animate=False)
+    app.processEvents()
+
+check("提示：任何位置都整块在屏幕内", not bad_scr, "越界: %s" % bad_scr)
+check("提示：任何位置都不被桌宠压住", not bad_pet, "被压: %s" % bad_pet)
+check("提示：任何位置都不超出菜单盘", not bad_disk, "超出: %s" % bad_disk)
+check("提示：文字居中在桌宠的正中轴线上（不歪）", not off_axis,
+      "歪了: %s" % off_axis)
+check("提示：左右贴边时改成竖向排列（横排放不进内侧窄带）",
+      "吸附左" in vertical and "吸附右" in vertical, "竖排的位置: %s" % vertical)
+check("提示：宽松的位置仍然用横排（不要动不动就竖排）",
+      "居中" not in vertical)
+pet_w.close()
+app.processEvents()
+
+print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))
+if FAIL:
+    print("失败项：" + "、".join(FAIL))
+sys.exit(1 if FAIL else 0)

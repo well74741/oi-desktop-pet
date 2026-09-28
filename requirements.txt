@@ -1,0 +1,5 @@
+PyQt5>=5.15.0
+pyyaml>=6.0
+pyinstaller>=6.0
+Pillow>=10.0
+PyQtWebEngine>=5.15.7   # 可选：webchat 网页聊天组件依赖（未装时该组件提示安装）

@@ -1,0 +1,1403 @@
+# oi桌宠 v0.9.14 · 项目交接文档（HANDOFF）
+
+> 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
+>
+> **版本号规则**：1.0 留给正式版，在那之前一律用两位小版本
+> （`0.9.03` → `0.9.04` → …），留足迭代空间。唯一来源是
+> `module_core.APP_VERSION`，改那一行就够。
+
+## 1. 项目是什么
+
+一个 Windows 桌面宠物（PyQt5），核心能力：
+
+- 桌面悬浮桌宠：呼吸动画、拖拽、屏幕边缘吸附/重排、右键菜单
+- 径向快捷菜单：最多 8 个按钮，支持网页链接 / 文件 / 程序 / 文件夹 / 命令，
+  拖入添加、拖拽交换、拖出删除、右键编辑（按类型弹不同编辑框）
+- 气泡模块系统：嵌入气泡或自动弹出；支持 HTTP / 大模型 / 智能体 / 时钟 /
+  脚本(Python/JS/Shell) / 文件 / 静态文本；自定义 Qt 组件插件（widgets/）
+- 聚合AI：桌宠开一个自己的宿主窗口（左边常驻站点栏 + 右边网页），把系统
+  浏览器的 `--app` 窗口 `SetParent` 塞进去；免 API Key、登录态持久化
+- 设置窗口：外观、径向菜单预览、气泡模块列表（可排序/启停/编辑/导出导入）
+
+> 注：早期版本的 **Codex 桥接（`codex_bridge.py`）**、**webchat 拆子进程
+> （`webchat_server.py`/`webchat_engine.py`）**、**进程内网页面板
+> （`webchat_panel.py`）** 都已从本快照移除，相关文件不存在。聚合AI 现在由
+> `webchat_launcher.py`（后端）+ `webchat_ui.py`（界面）两个文件实现。
+> 本文下方历史小节若仍提及它们，以此处为准。
+
+## 2. 当前工作区
+
+工作区 = 项目根目录（本文所在目录），**改动即生效，无需跨盘同步**。目录可被复制/
+迁移到任意位置，后续命令一律按项目根目录的相对路径执行。
+
+> 环境说明（会随机器变化，勿当作固定路径）：本快照当前所在开发机的项目根目录为
+> `D:\@AItest\vibe coding\oi桌宠`。历史文档里出现的
+> `D:\Practice\AItest\Codex_projects\oi桌宠_handoff`、
+> `D:\Practice\AItest\Deepseek_projects\oi桌宠`、`C:\Users\well\...` 等均为**旧机器路径，已失效**，
+> 仅作来源说明，切换机器后以实际检出目录为准。
+
+本文后续命令写相对路径；如果目录被复制到新位置，就在新位置执行。
+
+工作区与运行目录已合并为同一目录，**改动即生效，无需跨盘同步**；每次改完直接
+`cd D:\Practice\AItest\Deepseek_projects\oi桌宠 && .\启动桌宠.bat` 重启桌宠即可。
+改到的文件至少包括：`main.py`、`pet_gravity.py`、`status_monitor.py`、`bubble_ui.py`、
+`bubble_layout.py`、`h5_cards.py`、`codex_bridge.py`、`widgets/`、
+`自定义模块开发指南.md`、`HANDOFF.md`。
+
+## 3. 环境与依赖
+
+- 运行（开发调试）Python：任意 **Python 3.14 x64** 均可（路径随机器而定；旧文档里的
+  `C:\Users\well\AppData\Local\Python\bin\python.exe` 是旧机器路径，勿照抄）。
+- 运行依赖：PyQt5、PyQtWebEngine（网页聊天可选）、PyYAML、Pillow、psutil、numpy。
+  一键装齐：`python -m pip install -r requirements.txt`（或
+  `pip install PyQt5 PyQtWebEngine pyyaml Pillow psutil numpy`）。
+- **打包专用 Python 3.12 环境**（venv，默认位置 `%LOCALAPPDATA%\oi-packenv`）：
+  装 PyQt5 + PyQtWebEngine + numpy + psutil + PyYAML + Pillow + **PyInstaller 6.21.0**。
+  新机器一次性准备（约 3 分钟）：
+  ```powershell
+  pymanager install 3.12        # 或从 python.org 装 3.12
+  py -3.12 -m venv "$env:LOCALAPPDATA\oi-packenv"
+  & "$env:LOCALAPPDATA\oi-packenv\Scripts\python.exe" -m pip install PyQt5==5.15.11 PyQtWebEngine==5.15.7 PyYAML Pillow psutil numpy pyinstaller==6.21.0
+  winget install JRSoftware.InnoSetup --scope user   # 生成安装包用（可选）
+  ```
+  - 为什么用 3.12 打包：Python 3.14 + PyInstaller 的 onefile 在「自动重启」场景
+    反复出现 `_MEI`/`python314.dll` 兼容问题；3.12 + PyInstaller 6.21 稳定。
+  - 一键打包：**`build.bat`**（默认找 `%LOCALAPPDATA%\oi-packenv`，venv 在别处时
+    先 `set PYENV=...\python.exe`；Inno Setup 7 / 用户级 Inno Setup 6 / x86 版都会自动找）。
+  - **发版只改一处**：`module_core.APP_VERSION`。`build.bat` 会调
+    `_make_version.py` 依它生成 `version_info.txt`、用 `/DMyAppVersion` 传给
+    `oi桌宠.iss`、并给产物命名，不会再出现"改了版本号但某个文件没跟上"。
+    打包脚本与 iss 文件名都不带版本号，不必每版复制一份。
+  - `build.bat` 一次产出两样：
+    | 产物 | 体积 | 启动 | 说明 |
+    |---|---|---|---|
+    | `dist\oi桌宠<版本>.exe` | 26MB | 2.4s | 便携单文件，每次启动要解包 |
+    | `dist\oi桌宠_Setup_v<版本>.exe` | 20MB | 0.4s | 安装包，装的是目录版（不解包） |
+- 仅 Windows（状态模块用 Windows API）。
+- 启动时 `main._check_dependencies()` 会检查 PyQt5/PyYAML/Pillow 并提示安装。
+
+## 4. 关键文件与职责
+
+| 文件 | 职责 |
+|---|---|
+| `main.py` | 入口、托盘、单实例锁、依赖检查、退出清理（杀 WebEngine 子进程/取消提醒/清临时图片） |
+| `pet_gravity.py` | **核心**：桌宠窗口、径向菜单、设置窗口、RuleDialog、插槽系统、默认图标、右键多格式添加/编辑；配置原子读写（`save_settings`/`load_settings`/`_SETTINGS_LOCK`） |
+| `status_monitor.py` | 模块提供器：http/llm/agent/clock/script/file/static、`RuleProvider`、`PetAPI`、LLM 工具（`TOOL_DEFS`）、提醒定时器注册表 |
+| `module_core.py` | **模块契约层**：版本号、规则归一化、`ModuleSpec`/`ModuleView`、后台刷新调度和失败退避 |
+| `data_store.py` | 通用 JSON 数据层：带锁 + 原子写（todo/counter/chat_history 等用户数据） |
+| `bubble_ui.py` | 气泡窗口、聊天面板、模块行渲染、链接点击、`_widget_height` 高度自适应 |
+| `bubble_layout.py` | **唯一启用的气泡布局**（`StatusBubbleLayout`，pet_gravity 无条件实例化）；基类 StatusBubble 的旧手绘呈现已退役（不可达，勿再为其加功能） |
+| `h5_cards.py` | 测试区卡片渲染、`ResultView`、番茄卡片（QtWebEngine 可选） |
+| `webchat_launcher.py` | 「聚合AI」后端：找系统浏览器、`--app` 模式启动、**把浏览器窗口嵌进宿主**（`attach_browser`/`fit_browser`/`detach_browser`/`browser_insets`/`hide_browser`/`show_browser`/`focus_browser`）、站点存 `webchat_sites.json`。**纯后端，不碰 Qt**，可在后台线程调用 |
+| `webchat_ui.py` | 「聚合AI」界面：宿主窗口 `WebChatHost`（侧边栏 + 网页容器）、站点栏 `WebChatSidebar`、打开入口 `open_webchat()`、站点管理窗 `SiteManagerDialog`、后台打开 `opener()`。**必须留在顶层**（被 bubble_layout 静态 import，PyInstaller 才收得到） |
+| `widgets/` | 组件插件：`__init__.py`(ModuleWidget/加载器)、`kit.py`(通用控件库)、`tomato/panel/todo.py` 示例、`webchat.py`（只剩一行按钮，界面逻辑转发给 `webchat_ui`） |
+| `widgets/icons.py` | **共享高清图标库**：24 网格、4 倍分辨率绘制，供画布/拼豆等工具栏使用 |
+| `assets/` | 默认图标 `oi.png`、动图 `yxm.webp`、`icon.ico` |
+| `oi_pet_v020.spec` / `build.bat` / `oi桌宠.iss` | PyInstaller 打包配置（瘦身排除表 + 轻量/完整 + 单文件/目录 两组开关）、统一构建脚本、Inno 安装包脚本（版本号由命令行传入） |
+| `_make_version.py` | 依 `module_core.APP_VERSION` 生成 `version_info.txt` 并回吐版本号给 `build.bat` |
+| `_make_backup.py` | 一键备份为 `oi桌宠_backup_<时间戳>.zip`（含本机用户数据，仅本地留存） |
+| `_make_source.py` | 导出开发源码包 `dist/oi桌宠_v<版本>_源码.zip`（白名单，排除用户数据/构建产物，可直接发给别人或换机器） |
+
+## 5. 每次改动必须走的工作流
+
+1. 在工作区（= 运行目录）改代码
+2. 编译检查：`python -m py_compile <改动文件>`（或全量 `Get-ChildItem -Recurse -Filter *.py | python -m py_compile`）
+3. 发新版：改 `module_core.APP_VERSION`（小版本递增，别覆盖旧版本号），其余自动
+3. 跑测试：`python -u test_bubble.py`（64 项，必须全过）；组件缩放测试 `python -u test_components_scale.py`；
+   模板验证 `python -u test_templates.py`（111 项）；聚合AI/宿主嵌入 `python -u test_webchat.py`（54 项）；
+   桌宠倾角动画/空盘开合/悬停提示 `python -u test_pet_anim.py`（44 项）；
+   AI 改设置与设置窗一致性 `python -u test_settings_sync.py`（14 项）
+   （组件测试会真实渲染拼豆网格和共享图标，避免 paintEvent 静默失败）
+4. 重启桌宠：在当前工作区执行 `.\启动桌宠.bat`
+5. 备份：`python _make_backup.py`
+6. 需要发布 exe 时打包：`build.bat`（用 Python 3.12 venv + PyInstaller 6.21）；
+   （从 Git Bash 调 bat 时中文路径会乱码，要么在资源管理器/PowerShell 里双击运行，要么按脚本步骤手动执行）
+   dist 发布包要含 `widgets/`、`config.yaml`、`webchat_sites.json`（脚本已自动拷贝）
+7. `git add -A && git commit -m "..."`（**不要提交** pet_settings.json / chat_history.json / 各 *_data.json 等用户数据，.gitignore 已排除）
+
+## 6. 功能地图（当前已实现）
+
+- 桌宠：呼吸动画、按下回弹、阴影、oi.png/yxm.webp 双默认图标循环、
+  图片/GIF/WebP 拖入替换、冻结环境图标路径已修复（`_resolve_image_candidates`）
+- 径向菜单：贴边分区重排、背景盘填充、高亮/外扩、按钮与背景动画、
+  拖拽交换/删除、右键"编辑…（类型）"按 网页链接/命令/文件/文件夹/路径 弹不同编辑框、
+  盘面空白右键添加菜单（网页链接/文件/程序/文件夹/命令/清空）、网址按钮地球图标、
+  命令按钮用 `run://` 前缀 shell 执行
+- 气泡：固定 210px 宽、深色主题、透明度滑块、钉住/收起、链接点击、
+  对话面板（LLM 流式、代码块、复制、多会话、图片、**停止按钮**可打断回复）、
+  模块增删排序导出导入；
+  **模块行右键菜单**：立即刷新 / 禁用启用 / 上移下移 / 删除模块（内置模块
+  删除自动记入 hidden_builtins 防止复活）
+- 修复：点气泡✕关闭后无法再弹出——关闭即置 `_click_suppress`（需鼠标离开
+  桌宠再悬停才会再弹），桌宠帧循环增加悬停弹出兜底（不再依赖 enterEvent）
+- 模块系统：内置规则（CPU/内存/电池/网络/情绪/Codex 状态）与普通模块同权，
+  可编辑删除；嵌入/自动弹出二选一；`source.ui` 挂自定义组件（widgets/）；
+  **交互组件行统一带标题栏**（对话面板用自带标题栏，其余组件由布局框架加标题，
+  短文本行保持"标题+滚动值"单行）；AI 改待办后经 `todo_reload` 桥命令刷新
+  嵌入的待办组件（组件不再用旧列表覆盖 AI 新增）
+- LLM 能力层（显示名"AI 助手"，llm 不只是聊天）：`source.tools` 工具调用——
+  常用（get_time/open_url/remind）、待办（add_todo/delete_todo/list_todos）、
+  **管理模块**（list_modules/add_module/remove_module/enable_module/move_module）、
+  **管理桌宠**（pet_control hide/show/move、pet_setting 大小/透明度等、
+  pet_info）、**管理径向按钮**（list_buttons/add_button/remove_button/
+  move_button/edit_button）；注册表在 status_monitor.TOOL_DEFS；
+  `mode: task` 单次任务 + `json: true` 结构化输出；长对话自动摘要省 token；
+  Ollama 本地模型预设（免费离线）；**轻量调用层 `status_monitor.PetAPI`
+  （`_pet_api`）**：AI 工具↔桌宠状态/UI 的唯一通道（load/save/mutate_settings
+  带锁校验 + reload_rules/reload_buttons/reload_todo/apply_pet_setting/
+  control_pet/notify 命令助手），工具不再直接碰 pet_gravity/_tool_bridge，
+  以后把 AI 拆独立进程时只改 PetAPI 实现；管理类操作经该层主线程执行
+  （改设置文件 + 热重载）；**模块模板库 status_monitor.MODULE_TEMPLATES**
+  （clock/countdown/weather/static/counter/todo/script）+ list_templates/
+  add_module_from_template 工具，AI 建模块优先套模板；AI 助手面板带标题栏显示模型名
+- 聚合AI / 网页版大模型（无需 API Key）：用**系统浏览器的 `--app` 应用窗口**
+  打开（无地址栏、无标签页），不再内置任何浏览器内核。**桌宠开一个自己的
+  宿主窗口 `WebChatHost`**：Qt 布局排「站点栏 | 网页容器」，浏览器窗口被
+  `SetParent` 塞进容器。侧边栏因此占真实布局空间——网页被挤窄，不会被盖住。
+  入口有两个：气泡里的「聚合AI」按钮行（`bubble_layout._LBtnRow`）和
+  `ui=webchat` 组件行，两边共用 `open_webchat()`——**按钮就叫「打开」，
+  直接开上次那个站点，不弹站点列表**；换模型、加站点、置顶全部在侧边栏上
+  完成。**切站点在同一个窗口里换页**：旧页面只藏不关，切回去是瞬间的、
+  页面状态和写了一半的提问都还在（就是标签页）。站点列表存
+  `webchat_sites.json`，登录态存
+  `%LOCALAPPDATA%\oi桌宠\webchat_profile`（所有站点共用一个配置目录）
+- Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
+
+## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.14：中文候选浮窗还是飘 —— 根因是跨进程 SetParent，改成顶层+owner 2026-09-27】
+  - 0.9.13 只修了"浏览器缓存的屏幕坐标"，那确实是个真 bug，但**不是候选窗飘的
+    根因**。用 `GetGUIThreadInfo` 一量就清楚了：
+    - 独立浏览器窗口：`active == focus ==` 浏览器窗口，同一个线程；
+    - SetParent 进宿主之后：**`active` 是桌宠的宿主窗口（桌宠线程 30000），
+      `focus` 是浏览器的渲染子窗口（浏览器线程 23372）**。
+    Windows 的输入法 UI 是按**活动窗口所在线程**走的，于是输入法够不到网页，
+    退化成它自己那套浮动候选窗（截图里右上角那个 `d's'd'sa` 小框就是它），
+    位置自然和光标无关。跨进程 SetParent 里 active 与 focus 分属两个线程，
+    这个配置 Windows 本来就不支持，怎么校正坐标都救不回来。
+  - 改法（按"就跟平时在网页里打字一样"的要求选了最简单那条）：**网页窗口保持
+    顶层窗口**，靠三样东西粘在宿主上——
+    1. `owner`（`GWL_HWNDPARENT` 设成宿主）：z 序永远压在宿主之上、随宿主一起
+       最小化/恢复、不单独占任务栏和 Alt+Tab；
+    2. 宿主 `moveEvent` / 容器 `resizeEvent` 里**立刻**重摆（不能防抖，否则
+       拖动时页面掉队）；
+    3. `SetWindowRgn` 只露出内容那一块：Chromium 的 `--app` 窗口自己在客户区
+       画标题栏，以前靠父窗口裁，现在顶层窗口只能自己裁。
+    `attach_browser/detach_browser` → `glue_browser/unglue_browser`，
+    `resync_screen_pos` 连同 UI 层那套防抖校正一起删掉（根因没了）；
+    `focus_browser` 改用 `SetForegroundWindow`（跨线程 SetFocus 本来就无效，
+    而且让网页窗口成为活动窗口正是输入法正常的前提）。
+  - 代价（已和用户确认）：拖动宿主时网页最多慢一帧跟上；网页窗口移出屏幕边缘
+    时不再被父窗口裁掉。换来的是中文输入和独立浏览器完全一致。
+  - 回归：`test_webchat.py` 54 项（新增"绝不 SetParent"、"用 owner 粘住"、
+    "顶层窗口自己裁标题栏"、"move/resize 立刻重摆且无定时器"）；
+    `_check_host.py` 23 项，真实 Edge 窗口断言 **active 和 focus 同线程、且
+    active 就是网页窗口本身**，以及仍然严丝合缝、最小化/恢复/切站点都正常。
+
+- 【v0.9.13：聚合AI 里打中文，候选浮窗飘到很远/屏幕左上角 2026-09-27】
+  - **根因（实测确认）**：网页窗口被 `SetParent` 进宿主之后，**宿主移动并不会
+    让子窗口相对父窗口发生位移**，Windows 因此一条位置变更消息都不发——浏览器
+    内部缓存的"我在屏幕上的位置"就一直停在它出生时那个屏幕外的位置
+    （`--window-position=-32000,-32000`）。中文输入法的候选浮窗是 IME 按浏览器
+    给出的输入框**屏幕**矩形来摆的（TSF `GetTextExt`），拿到的坐标是错的，
+    候选窗于是飘到离光标很远的地方，坐标被夹住时就贴在屏幕左上角。
+  - 用网页里的 `window.screenX/screenY`（写进 document.title）当探针量出来的：
+    嵌入前自报 500,300 = 真实；嵌入后一直自报 -32000,-32000，宿主移到哪儿都不变。
+  - **嵌着的时候怎么戳都没用**（逐个试过）：SetWindowPos 原样重摆、
+    `NOMOVE|NOSIZE|FRAMECHANGED`、改尺寸 40px、在父窗口内真移动 30px、
+    `PostMessage(WM_MOVE)`——浏览器一律不理，连 JS 的 resize 事件都不触发；
+    顶层但**从未显示过**的时候摆位也不理。只有**摘成顶层、且它显示过之后**
+    摆位才会更新。
+  - 修法：新增 `webchat_launcher.resync_screen_pos()`——藏 → 摘成顶层 →
+    摆到容器所在的屏幕位置 → 再嵌回去 → 贴合 → 显示。热身后整圈约 18ms
+    （第一次 ~140ms），一帧内做完看不出闪动；同一个窗口，滚动位置/登录态/
+    键盘焦点都不丢。触发点：页面第一次显示之后校正一次（出生坐标就是屏幕外，
+    所以必须来一次），以及宿主 move/resize **停稳 180ms** 之后校正一次
+    （拖动期间不校正：拖着的时候不会打字，每帧校正反而会闪）。
+  - 回归：`test_webchat.py` 升到 56 项（第 11 节：首次显示后校正、拖动期间
+    合并成一次、停稳后校正、改大小也校正、没有页面时不校正）；
+    `_check_host.py` 升到 21 项，真实 Edge 窗口 + 本地探针页断言"浏览器自报的
+    屏幕位置 == 真实位置"（打开后、宿主移动后各一次），并确认校正之后仍然
+    严丝合缝、页面没被弄丢。
+
+- 【v0.9.12：AI 助手改的设置与设置窗不同步 2026-09-26】
+  - **AI 把桌宠调大，打开设置还是旧档位**：设置窗里「桌宠大小 / 气泡大小」
+    两个滑块绑的是 `pet_scale` / `bubble_scale` **档位**，而 AI 工具能改的键里
+    只有 `pet_size`（基准像素，窗里没有对应控件）。于是 AI 改 pet_size → 桌宠
+    真的变大了，但滑块还停在旧档位——"AI 改完，设置里是旧的"。
+    改法：`_PET_SETTING_KEYS` 加上 `pet_scale` / `bubble_scale`，并用
+    `_snap_level()` **吸附到最近一档**（`SettingsDialog._level_index()` 对不在
+    档位表里的值一律回 0，AI 设 1.3 会显示成"标准"，不吸附照样不一致）；
+    工具说明和 `pet_info` 都改成明确告诉模型"改大小请用 pet_scale 档位"。
+  - 顺带修掉两个同族隐患：设置窗持有的是 `dict(settings)` 快照，① 开着窗时
+    AI 改设置，窗里显示旧值、点确定还会把旧快照整份写回去，把 AI 的改动
+    （连新加的模块/按钮一起）覆盖掉——新增 `SettingsDialog.sync_external()` +
+    `GravityPet.sync_settings_dialog()`，`pet_setting`/`rules_reload`/
+    `buttons_reload` 三个桥命令都会同步开着的窗（滑块 setValue 要
+    blockSignals，否则会触发实时预览把档位反向写回去）；② `_open_settings`
+    打开前先 `self.settings.update(load_settings())`，兜住任何"只写盘"的路径。
+  - 回归：新增 `test_settings_sync.py`（14 项）。
+  - **数据安全教训（血的）**：这版的测试第一稿用 `os.chdir(临时目录)` 做隔离，
+    但 `get_config_path()` 取的是 `data_store.DATA_DIR`（脚本目录的绝对路径），
+    跟 cwd 无关——测试直接写了用户真实的 pet_settings.json，把 7 个自定义按钮
+    换成了测试按钮、丢了 3 个模块。已从 `oi桌宠_backup_20260926_150116.zip`
+    恢复。**以后凡是会写用户数据的测试：patch `data_store.DATA_DIR`，并在写
+    之前断言 `get_config_path()` 真的落在沙箱里，不满足就 sys.exit(2)。**
+    （也是 `_make_backup.py` 含用户数据的价值所在，别把它当成只是源码备份。）
+
+- 【v0.9.11：AI 助手回车发不出消息（0.9.07 的后遗症）2026-09-26】
+  - **打完字回车没反应**：`_ChatInput.keyPressEvent` 里是
+    `self.parentWidget()._send()`。0.9.07 修"收起态被裁切"时把输入行包进了一层
+    QWidget（`ChatPanel._bottom`）——**把控件加进某个布局，Qt 会顺手把它的父
+    控件改成那层容器**，于是 `parentWidget()` 从 ChatPanel 变成了那个无名
+    QWidget，`._send()` 抛 AttributeError，按键被吞掉。粘贴图片走的
+    `parentWidget()._add_pasted_image(...)` 是同一个坑。
+    改成信号：`_ChatInput.submitted` / `image_pasted`，由 ChatPanel 自己
+    connect。信号连谁和控件树多深无关，以后再包几层也不会断。
+    **教训：跨控件回调不要靠 `parentWidget()` 现找，布局一变就断。**
+  - 顺手修了输入框长高的判据：原来按 `document().blockCount()` 数段落，而
+    Shift+Enter 插的是**软换行**、自动折行同样不增加段落数——第二行会被裁在
+    框外，看着像字打丢了。改成按 `documentLayout().documentSize().height()`
+    的真实排版高度长高（仍封顶两行）。
+  - 回归：`test_bubble.py` 升到 64 项，新增「Enter 真的把消息发出去（消息进
+    对话 + on_send 被调用 + 输入框清空）」「Shift+Enter 只换行不发送」「贴图
+    信号接到面板」「两行时输入框装得下」。
+
+- 【v0.9.10：模块行文字出框（换字体的后遗症）+ 提示文字歪掉 2026-09-26】
+  - **气泡模块行里的值偏低、底部被裁**：`bubble_layout._font_h()` 原来是
+    "字体实际行高 + bs(4)"，而它是拿去当**行内文本控件的最小高度**用的
+    （`_ScrollText.setMinimumHeight`）。0.9.04 把全局字体从 SimHei 换成微软
+    雅黑，同字号（7.5pt×1.5）行高从 15px 涨到 20px，最小值算出来 26 > 行高
+    23——布局满足不了最小值就向下溢出，文字被挤到卡片下半部、底边还被裁掉。
+    两处一起改：`_font_h()` 只返回真实行高（余量交给 row_height 负责）；
+    `kit.row_height()` 的内边距预算从 `bs(2)` 改成 `2 * bs(1)`——卡片上下各
+    调一次 `bs(1)`，bs() 每次都取整，1.5 档下是 2+2=4，而 `bs(2)` 只有 3，
+    差的那 1px 正好让最小高度塞不进卡片。行高 23→24（1.5 档），值区从
+    "比卡片高 3px" 变成 "比卡片矮 2px"，标题与值回到同一条中线。
+  - **"拖入添加"歪掉**：候选角度原来是"从正下方开始顺时针扫一圈"，桌宠贴
+    下边时正下方放不下，扫到**正左**就先成功了——文字歪在左上，而正上方明明
+    是空的。改成 `_HINT_ANGLES`：**先把四个正方向试完**（正下 → 正上 →
+    正右 → 正左），再按偏角 10° 递增绕出去。现在居中/贴上=正下、贴下=正上、
+    贴左=正右、贴右=正左，一律落在桌宠的正中轴线上（只有卡在屏幕角上时才
+    偏 30°，那是几何上唯一的解）。
+  - 回归：`test_bubble.py` 升到 58 项，新增不变式「`_font_h() + 2*bs(1) <=
+    row_height()`」（与字体无关，离屏也能守住）和真实行几何「值区不超出卡片」
+    「标题与值同一条中线」×三档；`test_pet_anim.py` 升到 44 项，新增「提示
+    文字落在正中轴线上」。
+
+- 【v0.9.09：倾角提速一倍 + 空菜单盘不再卡在过冲上 + 提示文字排版 2026-09-26】
+  - **倾角动画提速一倍**：`SNAP_ROT_DURATION 0.45→0.22`、
+    `UNSNAP_ROT_DURATION 0.40→0.20`、`SNAP_MOVE_DURATION 0.28→0.14`。
+    缓动仍用 `ease_tilt`，单帧转角 1.6°→3.3°、在动的帧 25→13，还远好于旧的
+    15.5°/帧。别再往 0.1s 级别调，那就回到"一帧切"了。
+  - **空菜单盘开合动画"生硬"的真因**（不是曲线不同，是动画没跑完就收工）：
+    完成判定看的是 `_sector_scale >= 0.999`，而 `ease_out_back` 中途会冲到
+    **1.045**；空盘没有按钮陪跑（`all_done` 恒为 True），于是在过冲的峰值上就
+    判完成、定时器停掉，盘子永久停在比最终尺寸大 4.5% 的位置回不来；收起同理
+    停在 0.007。改成记录盘面自己的进度 `_sector_sp`，只用它判完成，并在到点时
+    把 `_sector_scale` 精确写成 1.0 / 0.0。有按钮时因为要等按钮跑完，反而一直
+    是正常的——所以只有空盘看着不对。
+  - **"拖入添加"排版**：改成按**整块文字**满足三条硬约束——整块在屏幕内、
+    整块在盘内、不与桌宠图标相交；原来只拿"一个点"判可见性，文字块因此会
+    探出盘沿、右半截被桌宠压住。新增 `_empty_hint_layout()`：排法优先
+    横排 → 对折两行 → 一字一行竖排，角度从正下方绕一圈、每个角度再从盘内
+    往外试半径，第一个全满足的就用；桌宠贴左右边时内侧只剩一条窄带，自动
+    转成竖向排列。结果按几何缓存（首算 0.1~0.6ms，命中 0.004ms），不是每帧重算。
+    文字透明度改成随盘面淡入淡出（原来卡在 `aa>0.4` 上"啪"地出现），位置也
+    跟着盘子一起往外展开。
+  - 回归：`test_pet_anim.py` 升到 43 项，新增「空盘/有按钮展开后盘面精确停在
+    1.0、收起精确归零」「提示整块在屏内 / 不被桌宠压住 / 不超出盘沿」「左右
+    贴边转竖排、宽松位置仍横排」。
+
+- 【v0.9.08：吸附/拔离的倾角改成真动画 + 模块列表标题只弹一个提示 2026-09-26】
+  - **倾角一帧切（用户："旋转角度不要一帧切，一定要有动画过渡"）**：两个根因。
+    一是 `mouseMoveEvent` 里拖动一开始就把 `_snap_rotation` 写 0，下一帧
+    `_current_rotation` 就从 25° 掉成 0°；原本"记下角度、等松手再过渡"的
+    `_pending_unsnap_rot` 那套等于空转（松手时角度早归零，回正动画没东西可动）。
+    二是吸附的 `snap_duration = 0.1s`，60fps 只有 6 帧，还用 `ease_out_back`
+    （30% 的时间走完 90% 的角度）——**单帧要转 15.5°**。
+    改法：倾角收归一条补间通道。新增 `_rest_rotation`（静止倾角，唯一权威值）、
+    `_start_rot_anim(target, duration, overshoot=True)` 与 `_step_rotation(breath)`；
+    最终角度 = `_rest_rotation` + 呼吸 + 拖动摇晃。**拖动一开始就起回正补间**
+    （`UNSNAP_ROT_DURATION=0.40`），吸附时起倾倒补间（`SNAP_ROT_DURATION=0.45`，
+    比位移 `SNAP_MOVE_DURATION=0.28` 长，看起来像先落到边上再倒过去）。
+    缓动换成新的 `ease_tilt()`（smoothstep + 末段 1.4° 轻微过冲）：**单帧最多
+    转 1.64°、25 帧都在动**。呼吸在补间期间也照叠，所以补间结束那帧不跳。
+  - 顺带修掉一个位移 bug：`if t_snap >= 1.0` 拿的是**缓动后**的值，而
+    `ease_out_back` 中途会冲到 1.10，于是吸附位移在 60% 处就判完成、桌宠停在
+    过冲的位置上（比目标更靠外）。改成用原始进度 `raw` 判完成。
+  - 删掉已经没用的 `_unsnap_active / _unsnap_timer / _unsnap_start_rot /
+    _unsnap_start_pos / _unsnap_duration / _pending_unsnap_rot`（那条分支的位置
+    插值在松手后 start==current，本来就是空操作）；`_frame_is_busy()` 改看
+    `_rot_active`，保证补间期间是 60fps。
+  - **模块列表标题悬停弹两个提示（一个黄底）**：标题同时挂了
+    `setToolTip()`（Qt 延迟原生提示）和 `eventFilter` 里的 `QToolTip.showText()`
+    （即时），先后各弹一个、位置还不一样。而 `showText` **不传控件**时用的是
+    系统调色板 `ToolTipBase = #ffffdc`，就是那块黄底；传了控件才会按样式表链
+    找到设置窗那条深色 `QToolTip{background:#232a3a}`。改法：去掉 `setToolTip`，
+    `showText(pos, text, obj)` 补上控件参数——只剩一个、且是深色那个。
+  - 回归：新增 `test_pet_anim.py`（33 项）。倾角部分量的是**每帧转多少度**
+    （≤3°）和**在动的帧数**（≥15 帧），并把旧曲线 15.5°/帧 留作对照；提示部分
+    断言标题 `toolTip()==""`、悬停只触发一次 `showText`、且第三个参数是标题控件。
+
+- 【v0.9.07：切站点与关闭时的两处闪烁 2026-09-26】
+  0.9.06 的嵌入方向是对的，但切换和关闭各有一帧穿帮。两处根因不同：
+  - **切站点时浏览器自己的标题栏（带最小化/关闭）闪一下**：`attach()` 原先是
+    「摆一次 → 立刻显示 → 再补几拍校准」。可浏览器刚被 `SetParent` 进来时，
+    渲染子窗口还没重排完，第一次量到的内缩量是旧的，于是先按错的位置显示
+    出来，等 80~700ms 后的补校准才把标题栏裁掉——那几百毫秒就是闪烁。
+    改成 **`_reveal()`：在隐藏状态下摆位 → `fit_ok()` 校验内容区是否正好
+    压住容器 → 对上了才 `show_browser()`**，20ms 重试一次、最多 0.8 秒兜底。
+    旧页面在这期间**继续显示**，等新页面亮出来再藏，所以中间也不会露出
+    容器底色。`show_browser()` 顺带提到同级最上面（否则新页面会被还显示着的
+    旧页面压住）。
+  - **关闭聚合AI 时窗口在屏幕左上角闪一下**：`closeEvent` 里先
+    `detach_browser()` 再关。摘回顶层的一瞬间，窗口的子窗口坐标（约 0,-31）
+    被当成屏幕坐标，于是它跳到屏幕左上角，而且**还显示着**，所以看得见。
+    改成**先 `hide_browser()` 再 `detach_browser()`**——摘的时候已经不可见了。
+    摘这一步不能省：宿主销毁会连带销毁子窗口，浏览器下次启动会弹"恢复页面"。
+  - 新增 `webchat_launcher.fit_ok()` / `content_rect()`：判断网页内容区是否
+    已经和容器对齐，是"能不能显示了"的唯一判据。
+  - 回归：`test_webchat.py` 加到 48 项，新增「没对齐就不显示」「显示之后才藏
+    旧的」「关窗口每个页面先藏再摘」等断言；`_check_host.py` 升到 17 项，
+    切换与关闭全程按 20ms 采样，断言**没有出现过一帧"可见但没对齐"或
+    "摘成顶层但还可见"**（实测两者都是 0 帧）。
+
+- 【v0.9.06：网页反过来嵌进桌宠的宿主窗口 + AI 对话面板收起态修复 2026-09-26】
+  用户否掉了 0.9.05 的"侧边栏浮在网页上"：要求侧边栏**不遮挡网页**、常驻、
+  和网页一体，并且切模型不能再新开窗口。与用户确认后走 Win32 子窗口这条路，
+  但**方向反过来**。
+  - **反向嵌入**：不再把侧边栏挂到浏览器窗口上，而是桌宠开一个自己的
+    `WebChatHost`（普通 Qt 顶层窗口，系统边框），里面用 QHBoxLayout 排
+    「`WebChatSidebar` | `_Holder` 网页容器」，再 `SetParent` 把浏览器的
+    `--app` 窗口塞进容器。**侧边栏占的是真实布局宽度，网页被挤窄而不是被
+    盖住**——这是浏览器不给第三方留内容区时唯一能做到"不遮挡"的办法。
+    附带好处一串：宿主是正经 Qt 窗口，坐标/菜单/悬停提示全部恢复正常（上一
+    版被迫用 `QCursor.pos()` 的 hack 全删了）；网页是子窗口，移动缩放由系统
+    同步，零延迟、零轮询；任务栏只剩一个窗口。
+  - **浏览器自画的标题栏**用 `browser_insets()` 解决：问渲染子窗口
+    （`Chrome_RenderWidgetHostHWND`）在哪，算出内容区的四边内缩，把窗口往
+    左上挪、往外撑，标题栏就被容器裁在可视区外。刚创建时量到的内缩是旧值，
+    `_refit_soon()` 在 80/260/700ms 各校准一次。
+  - **切站点不再新开窗口**：`open_site` 把窗口生在 `-32000,-32000` 且先
+    `SW_HIDE`，桌面上完全看不到它出现；宿主摆好再 `SW_SHOWNA` 显示。这也
+    彻底解决了"先出现在左上角再弹回来"——窗口从来就没在别处可见过。
+  - **切站点只藏不关**（踩坑记录，改这块必读）：网页窗口嵌在宿主里时，关掉
+    其中任意一个，**整个浏览器进程会退出**、剩下的页面跟着全没。实测对照过：
+    不嵌入时关一个没事，嵌入后必现。所以切换用 `hide_browser()`。这反而是
+    更好的设计——切回去 0.12s，页面状态和写了一半的提问都还在，就是标签页。
+    同理，关宿主时必须**先把所有页面 `detach_browser` 摘回顶层**再
+    `close_all`，否则宿主销毁连带销毁子窗口，浏览器下次启动弹"恢复页面"。
+  - `_is_live_browser_window()` 去掉了 `IsWindowVisible` 判定：窗口刚开出来
+    是我们主动藏的，嵌进去以后切走也是藏的，拿可见性当"活着"会把它判死
+    （这个 bug 让第一版反向嵌入直接开不起来）。
+  - 删掉一批用不上的：`close_others()`、`embed_child/unembed_child/child_rect`
+    （上一版方向的产物）、`_place()`、`_remember_size()`；窗口尺寸改由宿主的
+    `closeEvent` 存 Qt 逻辑像素（`set_preferred_size`）。
+  - **AI 对话面板收起态修复**（用户第二条反馈：收纳后被裁切、右侧按钮没对齐）：
+    - `current_height()` 原先返回写死的 `_BASE_H = bs(54)`。AI 助手面板带
+      标题栏（22px），收起态还要再加一行摘要，54 根本不够——底下那排折叠/
+      清屏按钮直接被裁在面板外。改成 `_base_h()` 问真实 sizeHint（并对
+      `setFixedHeight` 的部件取 `max(sizeHint, minimumHeight)`，否则标题栏
+      会被算少）。输入框打成多行也跟着长，不会再裁。
+    - 收起态的摘要标签原先带 `stretch 1`，一行字却把剩余空间全吃掉（实测
+      40px 高的灰条），把输入行挤出面板。改成 `stretch 0` + `kit.row_height()`。
+    - 右侧 2×2 按钮列改为**贴输入框底边对齐**（`Qt.AlignBottom`）；原先居中
+      对齐，输入框一长高按钮列就浮在中间。
+    - 顺带：摘要行标出"我：/ AI："和第几条、省略按标签真实宽度算（原先是
+      `width - 24` 的写死常数，放大档位下提前截断）；收起态上/下按钮改成翻
+      摘要（历史框是藏着的，原先点了没反应）；清空对话加了确认（不可撤销，
+      按钮就挨着折叠键）。
+  - 回归：`test_webchat.py` 重写为 40 项（布局不重叠、切站点只藏不关、关窗口
+    先摘后关、页面崩了自动切、打开入口）；`test_bubble.py` 加 10 项对话面板
+    几何断言（两种气泡档位 × 带标题栏/输入三行，断言不超出 `current_height()`
+    且按钮贴底）。手动脚本：`_check_host.py`（真实 Edge，15/15，含"网页左缘
+    在侧边栏右边"和"切回去 0.12s"）、`_check_chatpanel.py`（量面板几何）。
+
+- 【v0.9.05：侧边栏改成网页窗口的真子窗口 + 单窗口切换 2026-09-26】
+  0.9.04 的侧边栏还是"贴在旁边的另一个窗口"，用户实测三条：切站点时窗口还是
+  先出现在左上角再弹回来、侧边栏仍然是分离的、切站点会再开一个窗口。经与用户
+  确认走 **Win32 子窗口嵌入**这条路（另外两条备选是换回 QtWebEngine、或只修
+  bug 不做嵌入）。
+  - **"先出现在左上角再弹回来"的真正原因找到了**：不是命令行没生效。窗口检测
+    到以后，老代码先跑 `_windows_of(_profile_pids())` 去核对进程归属，那一步
+    要起 PowerShell 查 WMI，**要一秒**，跑完才摆位——窗口就在错的位置上干等
+    一秒。现在改成"先摆位，别的都靠后"，只有同一瞬间冒出多个 Chromium 窗口
+    （极罕见）才值得花这一秒去甄别。实测真实 Edge 窗口直接落在命令行给的
+    位置，`(400, 250, 900, 600)` 一次到位。
+  - **侧边栏改用 `SetParent` 塞进浏览器窗口**（`embed_child()`：先把 WS_POPUP
+    换成 WS_CHILD 再 SetParent，只 SetParent 不改样式的话只会变成"被拥有的
+    弹窗"，既不裁剪也不跟随）。位置由系统按父窗口客户区算，**移动/缩放/最小化
+    零延迟跟随，不可能分离，也没有缝**。心跳只剩三件事：跟客户区高度、定期
+    重申层级、刷新高亮。实测 Z 序稳定在 `Chrome_RenderWidgetHostHWND` 之上。
+  - 随之删掉一批不再需要的东西：`stack_beside()`、`work_area_at()`、
+    `visual_rect()`（DWM 视觉边界——子窗口坐标系里根本不需要）、
+    `window_usable()`、以及开窗时给侧边栏预留宽度的逻辑。
+  - **展开/收纳整个删掉**，侧边栏常驻（用户要求）。`collapsed()` /
+    `set_collapsed()` / `sidebar_enabled()` / `set_sidebar_enabled()` 一并
+    删除，不留没有入口的死开关。
+  - **切站点复用一个窗口**：`close_others()`。**顺序是硬要求**——必须先把
+    侧边栏嵌进新窗口，再关旧窗口；反过来的话旧窗口销毁会**连带销毁作为它
+    子窗口的侧边栏句柄**。`_Opener._on_done()` 里就是这个顺序，回归里专门
+    有一条测它。同理，齿轮菜单的「关闭网页窗口」也是先 `hide_sidebar()`
+    （内部会 unembed）再 `close_all()`。
+  - 用户直接点浏览器 ✕ 的情况来不及摘：下一拍发现父窗口没了就走
+    `_drop_native()`，把 Qt 这边的原生窗口一起 `destroy()` 复位，下次
+    `show()` 由 Qt 重建。实测杀掉父进程后主进程不崩、能重新嵌进新窗口。
+  - **坐标陷阱（改这块必读）**：嵌进别的进程的窗口之后，Qt 仍以为自己是顶层
+    窗口，`mapToGlobal()` / 自带 tooltip / `QMenu` 定位拿到的屏幕坐标全是错的
+    （窗口被停在 -30000 那儿）。所以齿轮菜单用 `QCursor.pos()` 弹，方块的
+    站点名提示改成自己在 `eventFilter` 里 `QToolTip.showText(QCursor.pos()…)`，
+    不要用控件坐标。
+  - 回归：`test_webchat.py` 重写为 38 项（嵌入/换窗口先摘后嵌/父窗口销毁复位/
+    关窗口顺序/单窗口切换顺序/打开入口）。真实行为另有两个手动脚本：
+    `_check_embed.py`（另起一个进程的 Qt 窗口当父窗口，9/9，含杀父进程存活）
+    和 `_check_embed_real.py`（真实 Edge `--app` 窗口，7/7，用临时 profile，
+    跑完即删，不碰登录态）。
+
+- 【v0.9.04：侧边栏贴合与悬浮把手 + 全局字体统一微软雅黑 2026-09-26】
+  用户实测 0.9.03 的四条反馈，逐条修在这一版。
+  - **开窗时网页"从屏幕左侧跳过来"** → `open_site()` 以前只传 `--window-size`，
+    窗口先按浏览器自己记的位置（常是屏幕左上）画出来，我们再 `SetWindowPos`
+    挪过去，于是看得见一次位移。现在把 `--window-position` 一起传给浏览器，
+    落地即到位；命令行吃的是 DIP，按 `dpi_scale_at()`（`GetDpiForMonitor`）
+    换算回去。窗口出现后仍按物理像素校准一次，探测轮询从 200ms 收紧到 20ms，
+    残余位移基本看不见。
+  - **侧边栏和浏览器窗口之间有一条缝（看着像"分离"）** → 根因是
+    `GetWindowRect` 返回的矩形含 DWM 那圈**透明的调整边框**（Win10 实测左右
+    各 7px），照它贴就会空出来。新增 `webchat_launcher.visual_rect()`
+    （`DwmGetWindowAttribute` + `DWMWA_EXTENDED_FRAME_BOUNDS`）取视觉边界，
+    侧边栏改贴它。`window_rect()` 保持原义不动——它是 `SetWindowPos` 的
+    坐标系，两者混用会让窗口每次重开都缩水一圈。
+  - **拖窗口时侧边栏跟不上** → 心跳改自适应：位置一变就切到 16ms 跟帧，
+    静止约 0.7 秒后降回 200ms（`POLL_FAST`/`POLL_IDLE`/`FAST_TICKS`）。
+    同时把"摆位"和"重排 Z 序"拆开（`stack_beside(..., restack=)`）：跟随途中
+    只挪位置，层级每秒补一次——每帧都重排 Z 序会闪。
+  - **展开/收纳按钮不要单独占一列** → 原来右边是一条和面板同高的暗色竖条，
+    看着就是第二列。现在把手 `_tab` 不进布局，由 `_place_tab()` 手动贴在
+    侧边栏右边缘、垂直居中，只有 11×46（逻辑像素）的一枚圆角胶囊；面板右
+    内边距给它让出位置，方块不会被压住。**收起后整条栏缩成这枚胶囊**
+    （宽 11、高 54），贴着浏览器左缘浮着，不再是一条贯穿上下的窄条。
+  - **全局字体统一微软雅黑** → 源码里 67 处 `SimHei`（`QFont("SimHei")` 与
+    QSS 的 `font-family`）全部换成 `Microsoft YaHei`，含 `widgets/kit._FONT`；
+    另外在 `main._apply_app_font()` 里设 `app.setFont()`，托盘右键菜单、
+    QMessageBox 这类 Qt 自建控件用的是**应用默认字体**，不设就仍是系统字体，
+    这正是用户说的"托盘右键的字体没统一"。回退链 雅黑 → 雅黑 UI → Segoe UI
+    → SimHei，非中文系统上不至于掉字。网页窗口是独立浏览器进程，不受影响。
+  - **聚合AI 按钮改成「打开」，不再弹站点列表** → 新增 `open_webchat()`
+    顶替 `show_site_menu()`（后者已删除）：开上次用的站点（`last_site()`，
+    存 `webchat_windows.json`），已经开着就聚焦回去，站点没了退回列表第一个。
+    切换模型和全部设置收进侧边栏——手在浏览器上时改比回桌宠点菜单顺手。
+    `bubble_layout._btn_text()` 也不再在"打开/切换"之间跳字。
+    连带：齿轮菜单去掉「隐藏侧边栏」（气泡菜单没了，隐藏就没有入口开回来；
+    要腾地方用「收起站点栏」，还剩把手点回来）。
+  - 网页窗口的落点会给侧边栏预留宽度（`_placement_near_pet()`），否则窗口
+    一贴工作区左缘，侧边栏就只能压在网页上。
+  - 回归：`test_webchat.py` 扩到 47 项（新增悬浮把手位置/收起成小标签/
+    自适应心跳/跟随不重排层级/「打开」入口四种分支）；另跑了一次真实 HWND
+    活体验证，确认 `GetWindowRect` 与 DWM 视觉边界差 7px、改用后严丝合缝。
+
+- 【v0.9.03：聚合AI 左侧边栏 + 界面层拆出顶层模块 2026-09-25】
+  用户要"和原来一样的布局"：浏览器窗口左边贴一条可展开/收纳的侧边栏，
+  能选大模型、能添加、能设置。
+
+  - **版本号编号规则改为两位小版本**（`0.9.3` → `0.9.03`）：1.0 留给正式版，
+    两位小数位留足迭代空间。只改 `module_core.APP_VERSION` 一行；
+    `_make_version.py` 生成的数字元组是 `(0, 9, 3, 0)`（Windows 版本资源
+    不接受前导零，显示字符串仍是 `0.9.03`）。
+  - **新增 `webchat_ui.py`（顶层）**，把界面从 `widgets/webchat.py` 搬出来。
+    为什么必须是顶层：`widgets/*.py` 是运行期按文件路径动态加载的，
+    PyInstaller 静态分析看不见，界面代码留在里面它的依赖会漏打包——
+    v0.9.2 的"画布/拼豆加载失败"就是同一个坑。顶层模块被 `bubble_layout`
+    静态 import，打包工具正常收集（已确认 `webchat_ui` 在 PYZ 里）。
+    `widgets/webchat.py` 现在只剩一行按钮 + 转发。
+  - **`WebChatSidebar`**：无边框 `Qt.Tool` 窗口，`WA_ShowWithoutActivating`。
+    展开 = 面板(40) + 箭头条(12)，收起只剩箭头条(12)（逻辑像素，再乘 UI_BASE；
+    实测 1.5 倍下 78px / 18px）。方块按钮显示站点名首字、悬停提示全名、
+    当前站点高亮；底部 `＋`（直接进站点管理并清空表单）和 `⚙`（置顶/管理/
+    收起/隐藏/全关）。收起状态与"要不要显示侧边栏"存在 `webchat_windows.json`。
+  - **位置与层级全走 Win32，不用 Qt 的 move/resize**：`GetWindowRect` 给的是
+    物理像素，Qt 几何是逻辑像素，屏幕缩放不是 100% 时两者对不上；直接
+    `SetWindowPos` 就没有换算误差。同理夹边界用新加的
+    `webchat_launcher.work_area_at()`（`MonitorFromPoint` + `GetMonitorInfoW`），
+    不用 Qt 的 `availableGeometry()`。
+  - **层级只插在浏览器窗口的下一层**（`stack_beside`），不做全局置顶——
+    否则切到别的程序它还浮在最上面。200ms 心跳跟随移动/缩放/最小化；
+    位置没变就不重复摆位，每 5 拍重申一次层级（别的窗口插进来时能回位）；
+    **网页窗口全关后心跳自动停掉**，不留空转定时器。
+  - `webchat_launcher.py` 新增：`active()` / `window_rect()` / `window_usable()` /
+    `stack_beside()` / `focus()` / `work_area_at()` / `sidebar_enabled()` /
+    `collapsed()` 等；`open_site()` 会记录当前活动站点 `_ACTIVE`。
+  - 点侧边栏切换站点时，新窗口开在**当前窗口的位置**（视觉上像切标签页），
+    没有窗口时才按桌宠位置算落点。
+  - 新增回归 `test_webchat.py`（35 项，离屏 + 全打桩，不碰真实站点文件、
+    不启动浏览器）；另做了真实 HWND 的活体验证：贴边、顶部对齐、等高、
+    跟随移动缩放、收起/展开全部正确。
+
+- 【v0.9.3：修安装版三个致命问题 2026-09-25】
+  用户反馈安装版"画布/拼豆加载失败、展开按钮没了、设置点确定既不保存也退不出、
+  点桌宠卡死"。查出三个独立根因，其中两个是这轮自己引入或加剧的。
+
+  1. **`tempfile.mkstemp` 在不可写目录会死循环（卡死的真凶，最严重）**
+     Windows 上 `mkstemp` 的重试判据是 `os.access(dir, W_OK)`，而 `os.access`
+     在 Windows **只看只读属性、不看 ACL**，对 `C:\Program Files\...` 一直返回
+     True，于是 `continue` 重试——而 Windows 的 `tempfile.TMP_MAX` 是 **21 亿**。
+     实测（Python 3.12）：8 秒后仍在 100% 占满一个核，永不返回。
+     安装版只要尝试保存任何用户数据就会永久卡死。
+     已换成 `data_store.make_temp_file()`（`os.open` + `O_EXCL`，最多试 8 次，
+     权限错误立即上抛，实测 0.000s 返回）。原来三处 `mkstemp` 全部替换：
+     `data_store._is_writable` / `data_store.write_json_path` /
+     `pet_gravity.save_settings`。**不要换回 `tempfile.mkstemp`。**
+
+  2. **打包漏了动态加载组件的依赖 → 画布/拼豆加载失败**
+     `widgets/canvas.py`、`perler.py` 里有 `from widgets import icons`，而组件是
+     运行期按**文件路径**动态加载的，PyInstaller 静态分析看不到，`widgets/icons.py`
+     根本没进包 → `No module named 'widgets.icons'` → 红点 + 没有展开按钮。
+     spec 增加 `_dynamic_deps()`：扫描 `widgets/*.py` 的 import 语句自动补
+     hiddenimports（这次补进 37 项），新增组件不必再改 spec。
+     另外 `load_module_widget` 现在**也缓存失败**——原先每次气泡重排都会重新
+     exec 一遍上千行的组件文件（实测缓存后快 5183 倍），并把失败写进错误日志
+     （原先完全静默，只在气泡上显示个红点，查起来毫无线索）。
+
+  3. **`SettingsDialog._on_accept` 少了 `self.accept()`（我在 9/24 删拖尾时误删）**
+     真正的落盘在 `GravityPet._on_settings_finished` 里，只有 `finished(Accepted)`
+     才会 `save_settings`。少了它，点「确定」既不保存也关不掉窗口。
+     诊断日志里满屏 `settings finished result=0` 就是证据。
+     自 9/24 13:46 起源码版也一直是坏的。已补回 `accept()` 与两档尺寸的保存。
+
+  - **安装目录不可写的根治**：`data_store._pick_data_dir()` —— 打包后优先用
+    exe 旁边（便携版"一个文件夹拷走"），**不可写时退到 `%LOCALAPPDATA%/oi桌宠`**
+    并把 exe 旁残留的 `*.json` 迁移过去；`pet_gravity.get_config_path()` 也改为
+    跟随它。实测装在只读目录时 `write_json`/`save_settings` 都是毫秒级完成。
+  - **新增卡死诊断**：设环境变量 `OI_FAULTLOG=1` 启动，每 10 秒把所有线程的
+    Python 栈写到 `%TEMP%/oi_pet_hang.log`。必须放在 `main.py` **模块最顶层**——
+    这次就是卡在模块导入阶段，放进 `main()` 里根本抓不到。本次死循环正是靠它定位的。
+  - 排查手法记录（可复用）：用 `icacls DIR /inheritance:r /grant:r "用户:(OI)(CI)(RX)"`
+    再 `icacls DIR\* /reset /T`，可以造出与 Program Files 权限一致的只读目录来
+    复现安装版问题。注意 `(OI)(CI)` 对文件无效，必须靠继承下发。
+
+- 【v0.9.2：聚合AI 改为系统浏览器应用窗口，删除内置内核 2026-09-25】
+  - **为什么不用 API 替代网页版**（用户提出，结论修正了上一版的判断）：网页端是
+    一整套产品——联网搜索、深度研究/Agent、文件上传解析、画布、画图、长期记忆，
+    而且常能免费用到最强模型；API 只给模型本身，这些能力拿不到。所以网页版不可
+    替代，不能砍。免费额度 API（智谱 GLM-Flash 永久免费、NVIDIA NIM、Groq、
+    Gemini 免费层等）依然存在，但它的价值在于**能被桌宠模块调用**，与网页版是
+    两种用途，不是替代关系。
+  - **方案：系统浏览器的 `--app` 应用窗口**。`msedge.exe --app=URL` 打开的窗口
+    没有地址栏、没有标签页，只有一条细标题栏，外观接近内嵌面板；内核随系统更新；
+    打包体积为零。桌宠用 Win32 把它摆到身边、可置顶、再次点击聚焦而不是重开。
+  - `webchat_launcher.py`（新）要点：
+    - **不能按"我们启动的那个进程"找窗口**：同一个 `--user-data-dir` 第二次启动时，
+      新进程会把请求转交给已有实例后立刻退出，进程树是空的。改为"启动前后对所有
+      Chromium 顶层窗口做差集"，只在确认时查一次进程命令行。
+    - `SetWindowPos` 的 `hWndInsertAfter` 是句柄宽度：直接传 `-1`(HWND_TOPMOST)
+      会被当成 32 位 int，64 位下静默失败。必须 `ctypes.c_void_p(-1)`。
+    - 聚焦路径**不查进程命令行**（起 PowerShell 约 1 秒，点一下卡一下），只用
+      `IsWindow`+`IsWindowVisible`+类名校验。优化后首开 3.4s→1.3s、聚焦 1.5s→0.7s。
+    - `compute_placement()` 是纯函数（只收数字元组，不碰 Qt），所以整个打开流程
+      可以丢到后台线程，不卡桌宠动画。**改这里时别把 Qt 调用加回去。**
+    - 浏览器配置目录放 `%LOCALAPPDATA%/oi桌宠/webchat_profile`：安装版装在
+      Program Files 没有写权限，而且 profile 会长到几百 MB。
+  - **聚合AI 实际走的是气泡里的按钮行**（`is_action=True` → `bubble_layout._LBtnRow`），
+    不是 `widgets/webchat.py` 的组件行。菜单逻辑抽成 `show_site_menu()` 由两边共用——
+    改聚合AI 行为时两条路径都要想到。
+  - **删除 `webchat_panel.py`**（557 行）：改用应用窗口后它没有调用方，还维护着
+    第二份站点存储（同一个 `webchat_sites.json` 两套默认值）。它是唯一的
+    QtWebEngine 消费者，所以 spec 里的 `OI_WITH_WEBENGINE` 开关和 `build.bat full`
+    也一并去掉，QtWebEngine 进入永久排除表。旧文件在备份 zip 里。
+  - 站点管理窗（`SiteManagerDialog`）：添加 / 保存修改 / 上移下移 / 删除。
+    ⚠ 「添加」和「保存修改」必须是两个按钮——合成一个时，只要列表里选中了某行就会
+    变成覆盖那一行，看着像添加、实际把已有站点改掉了（这个 bug 真实发生过，
+    把 DeepSeek 覆盖成了测试站点，靠备份 zip 恢复的）。
+  - 测试自律：站点管理的自动化测试必须先拦掉 `save_sites`，否则会写坏真实的
+    `webchat_sites.json`。
+
+- 【v0.9.1：空闲降帧 + 目录版启动 + 版本号单一来源 2026-09-25】
+  - **帧循环调速**：`_update_frame` 过去固定 16ms 且每帧无条件 `update()`。
+    现在分三档——交互/动画 `FRAME_MS_BUSY`(16)、纯呼吸待机 `FRAME_MS_IDLE`(33)、
+    隐藏 `FRAME_MS_HIDDEN`(200)；并加 `_request_paint()`：与**上次实际重绘**时的
+    状态比，位移 <0.3px、转角 <0.15° 就跳过（呼吸相邻帧只动 0.2px，正弦波峰附近
+    接近 0）。A/B 实测空闲重绘 73.5 → 45.7 次/秒（-38%）。
+    ⚠ `_frame_is_busy()` 不要把 GIF/WebP 算作忙碌——默认桌宠就是 WebP 动图，
+    算进去这项优化直接失效；动图由播放器自己回调 `update()`，不需要帧循环陪跑。
+    剩下的 45.7 次里约 15 次正是动图本身，去不掉。
+  - **隐藏时不再空转**：此前全屏应用遮挡时桌宠 `hide()` 了但定时器照跑 60fps。
+    现在 `_update_frame` 开头 `isVisible()` 为假就早退并降到 5fps，实测 0 次重绘。
+  - **启动提速**：单文件每次启动都要把整包解到 `%TEMP%`，实测 2.4s；改用目录版
+    (`OI_ONEDIR=1` → `COLLECT`) 后 0.4s。安装包改装目录版（用户看不到目录结构），
+    便携单文件保留给要"一个文件拷走"的场景。顺带：安装包 28MB → 20MB，因为 Inno
+    的 lzma2 压原始文件比压已压缩的 onefile 更有效。
+  - **版本号单一来源**：以前发版要同步改 `APP_VERSION`、`version_info.txt`、
+    `build_vXXX.bat`、`oi桌宠_vX.X.X.iss` 四处，还每版复制一套脚本。现在只改
+    `module_core.APP_VERSION`，`_make_version.py` 生成版本资源并把版本号回吐给
+    `build.bat`，iss 用 `/DMyAppVersion` 接收。已删除被取代的
+    `build_v060~090.bat`、`oi桌宠_v0.7.0~0.9.0.iss` 共 11 个旧脚本（备份 zip 里有）。
+  - 验证：`build.bat` 是把源码包解到纯英文路径从零跑通的（顺带证明源码包自足可构建）。
+    ⚠ 从 Git Bash 调 bat 会因中文路径乱码失败，要在资源管理器/PowerShell 里运行。
+
+- 【包体优化：126MB → 26MB（-79%）2026-09-24】
+  - 打包前先量：源文件合计 303MB，大头是
+    `Qt5WebEngineCore.dll` 97MB、`opengl32sw.dll` 20MB、numpy 的
+    `libscipy_openblas` 20MB、`icudtl.dat` 10MB、`PIL\_avif.pyd` 7.5MB。
+    UPX 其实**没装**（spec 里 `upx=True` 一直被静默跳过），所以体积全靠排除。
+  - **numpy 根本没用到**：项目里 0 处 import，是 Pillow 的打包钩子顺带拉进来的
+    （含 20MB OpenBLAS）。AVIF 解码同理（桌宠图片只支持 png/jpg/gif/webp）。
+  - **QtWebEngine 只服务"聚合AI"一个功能**，却占整包四分之三，而且内核是
+    Chromium 83，个别站点还得靠伪装 UA 才能用。改为默认不打包：
+    `widgets/webchat.py` 检测不到内核时弹站点菜单，交给系统默认浏览器打开
+    （内核新、自带登录态，多数站点体验反而更好）。需要内置网页窗就打完整版。
+  - `main.py` 启动时那段 `QWebEngineProfile.setHttpUserAgent` **是纯重复**——
+    `webchat_panel` 建面板时已经设了同一个 UA。删掉后启动不再初始化 Chromium。
+    `AA_ShareOpenGLContexts` 改为仅在能找到 QtWebEngine 时才设
+    （`importlib.util.find_spec`，只查不加载）。
+  - spec 改动：① `excludes` 加 numpy/scipy/pandas/matplotlib、tkinter/unittest
+    等标准库大件、以及项目没 import 的 22 个 PyQt5 子模块（只留
+    QtCore/QtGui/QtWidgets/QtWinExtras）；② `excludes` 只拦 Python 模块，
+    Qt 的 DLL/资源是钩子按目录整体收的，所以再加 `_strip()` 按文件名剔除
+    `opengl32sw.dll` / `_avif` / WebEngine 全家 / ANGLE(`d3dcompiler_47`,
+    `libGLESv2`, `libEGL`) / Quick+Qml；③ 完整版会把 Quick/Qml/Positioning
+    从排除表里**移回来**——QtWebEngineWidgets 建立在它们之上，排掉会运行时崩。
+  - 实测：轻量版 exe 26MB、安装包 28MB（原 126/127MB）；完整版 103MB
+    （排除表对它同样有效）。两版都实测启动无错误日志。
+  - 验证手法（以后可复用）：开发版桌宠开着时，把 `TEMP`/`TMP` 指到临时目录再跑
+    exe，它就有自己的单实例锁，不会和开发版抢；桌宠窗口被"全屏隐藏"规则藏起来时，
+    用 `PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)` 可以把隐藏窗口的内容
+    渲染出来核对（确认了 26MB 版的 WebP 动图解码与绘制都正常）。
+  - ⚠ 保留项：`qwebp.dll`（Qt WebP 插件）与 `PIL\_webp.pyd` 必须在——默认桌宠
+    图标是 `assets/yxm.webp`。改排除表后请用上面的办法核对图案能正常画出来。
+
+- 【v0.9.0 补丁 3：标题栏下方空带（真因）+ 回退无效改动 2026-09-24】
+  - **真因是标题栏过高**，不是外边距：`DarkTitleBar` 固定 36px（1.5 倍后 54px，
+    比系统标题栏还高），标题字号只有 12px，下半截是空的；再叠上内容区 10px 上边距
+    和 `QGroupBox` 自带的 12px 标题外边距，从标题文字底到第一个分组共空 31px。
+    改：标题栏 36→28、左右内边距 12/4→10/2、`TitleIconButton` 默认 30→24
+    （仍是正方形，1.5 倍后 36×36，不会被 28px 的栏裁掉）；设置窗内容区上边距
+    单独收到 3（左右仍 10）——分组自带标题外边距，不需要再留一圈。
+    实测：标题栏 54→42px，标题栏底到分组顶 15→4px，整窗 889→840px 高。
+  - **回退上一版在这一片加空间的改动**（与"空隙太大"相反，属无效补丁）：
+    `appear_layout` 边距/间距 4/6 → 恢复 2/2；`info_layout` → 恢复 (4,1,4,2)/2；
+    两个尺寸滑条 `setMinimumWidth` → 恢复 `setFixedWidth(140)`。
+  - 保留的是经实测验证的部分：`_zoom_layout` 继承间距二次放大修复、
+    `_apply_dark_style` 四窗同风格、标签列对齐、模板列表横向滚动条。
+  - 遗留可清理项（未动，需要时再处理）：`build_v060~082.bat` 与
+    `oi桌宠_v0.7.0~0.8.2.iss` 共 9 个旧版打包脚本；38 个备份 zip（18MB）；
+    `dist\oi桌宠.exe` 与 `dist\oi桌宠0.9.0.exe` 内容相同各占 126MB（.iss 需要
+    前者的固定名，后者是版本名副本）。
+
+- 【v0.9.0 补丁 2：分界线停靠恢复 + 拖出吸附不再跳帧 2026-09-24】
+  - **分界线停靠（用户确认的交互）**：松手时靠近/压着两屏分界线，就停靠在线上，
+    朝桌宠中心所在那块屏倾倒（按钮也排在那块屏）。此前能停靠其实是强制
+    `QT_SCALE_FACTOR` 的副作用——两屏 Qt 坐标中间断开，分界线被当成外边缘；
+    去掉强制缩放后坐标连续，`_edge_is_outer` 把分界线排除了，这个行为随之消失。
+    现在 `_check_edge_snap` 四条边都参与判定，`_edge_is_outer` 已删除。
+    跨屏不受影响：只在松手时判定，拖进另一块屏内部（离分界线超过阈值）松手不吸附。
+  - **拖出吸附状态一帧跳变**：贴边时桌宠半个身子在屏外，而 `_clamp_to_desktop`
+    要求整个窗口在桌面内，拖动第一帧就被拉回约 60px。现在允许探出桌面，但至少
+    露出"阴影留白 + 半个身子"（与贴边时的可见部分相同），防拖丢保护仍然有效。
+  - 实测（真实 GravityPet + 模拟鼠标）：主屏侧/副屏侧压分界线均停靠且朝向正确；
+    从停靠状态逐帧拖出偏差 0px；副屏内部松手不吸附；外边缘照常；甩出桌面仍露 68px。
+
+- 【v0.9.0 补丁：贴边吸附恢复 + 窗口间距/对齐统一 2026-09-24】
+  - **贴边不倾斜/不吸附**：吸附距离原按"图标边缘"算，但窗口四周有阴影留白
+    （`PET_SHADOW_MARGIN`，1.5 倍后 12px），拖动又被 `_clamp_to_desktop` 限制在桌面内，
+    图标离屏幕边至少 12px，永远进不了 5px 阈值。改为 `GravityPet._edge_distances()`
+    按**窗口外框**计算，阈值 `kit.ui(EDGE_SNAP_THRESHOLD)` 随界面倍率缩放。
+  - `_edge_is_outer` 误判：传入的是可用区域（扣了任务栏），自身完整屏幕区域与
+    任务栏那一条相交 → 主屏底边被当成"分界线"永远不吸附。比较时跳过自身屏幕。
+    实测两屏 6 条外边缘全部可吸附、倾斜方向正确（分界线后来改为也可停靠，见补丁 2）。
+  - **缩放引擎二次放大间距**：子布局未显式设间距时 `spacing()` 返回继承自父布局的值，
+    父布局放大后子布局再放大一次（9→14）。`_zoom_layout` 现在在改父布局前先判定
+    "子间距 == 父间距"即为继承，继承的不再放大。
+  - 左右两列 `QVBoxLayout` 叠了一层默认边距（与外层 root 重复），已清零。
+    ⚠ 当时以为这就是"标题栏下方空隙"的原因，其实只减掉了 14px，主因是标题栏
+    本身过高，见下一条补丁 3。
+  - **统一深色样式** `_apply_dark_style(dlg, extra="")`：设置 / AI 设置 / 添加模块 /
+    自定义模块 四个窗口共用设置窗那套 tech QSS 的深色版（按钮、勾选框、输入框一致），
+    并补回 `DarkDialog` 被覆盖的 1px 外框。新的深色对话框请直接调用它。
+  - 标签列对齐：AI 设置窗 70px、自定义模块窗 64px 统一标签列，各行输入框左边缘一致；
+    切换模块类型后重建的表单行也对齐（窗口已放大后创建的行自行换算间距）。
+  - `load_settings` 每次加载都会再追加一个 `builtin_network` 到 `hidden_builtins`，
+    保存后无限增长；现已去重保序。
+
+- 【v0.9.0：界面基准倍率 1.5 改为"数值缩放"，1 倍渲染 2026-09-24】
+  - 背景：去掉 `QT_SCALE_FACTOR=1.5` 后文字清晰了，但整体只剩原来的 2/3，用户要求
+    恢复原尺寸、且**不能再用位图放大文字**。
+  - 方案：Qt 始终按系统真实 DPI 渲染（100% 屏 dpr=1），所有尺寸在"数值"上乘
+    界面基准倍率 `kit.UI_BASE`（默认 1.5，可用环境变量 `OI_UI_SCALE` 覆盖，范围
+    0.5–3）。字号是直接设成 13.5pt 之类的矢量字，不是把 9pt 的图放大。
+  - 两条路径（**新增控件必须归属其一，否则会不缩放或缩放两次**）：
+    ① **kit 驱动**（气泡、桌宠、径向菜单、预览盘、小气泡、H5 卡片）：
+       `kit.bs()/ps()/font_pt()/bubble_k()/pet_k()` 已乘 `UI_BASE`；这些顶层控件都
+       `setProperty("oi_nozoom", True)`，窗口整树缩放会跳过它们。
+       `kit.bubble_scale()/pet_scale()` 仍返回原始档位（设置比较用），**算尺寸请用
+       `bubble_k()/pet_k()`**。`kit.ui(v)` = 只乘 UI_BASE（设置窗里的预览等用）。
+    ② **普通 Qt 窗口**（设置窗、RuleDialog、AI 设置、模板库、kit.confirm/info/warn、
+       QMessageBox/QInputDialog、托盘菜单等）：`main.py` 调 `kit.install_ui_zoom(app)`，
+       在控件首次 Polish 时一次性放大：样式表 px、显式字体、最小/最大尺寸、布局
+       边距/间距、图标尺寸；应用字体与 QToolTip 字体也同步放大。控件打上 `oiZ`
+       标记防重复；之后再调用 `setStyleSheet` 会被 shim 自动按倍率换算。
+       判定规则 `_zoom_wanted`：沿父链找最近的标记——`oi_nozoom` → 不缩；
+       `oi_zoom` 或遇到 `QDialog` → 缩；默认缩。所以气泡里弹出的 kit 对话框仍会被放大。
+  - `h5_cards`：`CardView/PomodoroCard/CardHost/ResultView` 接收倍率 `k`
+    （默认 `UI_BASE`，气泡里传 `bubble_k()`），自身标记 `oi_nozoom`；`ResultView`
+    的 `pin_size` 按标准档逻辑尺寸传入、内部换算。自定义卡片构建函数可接收 `k=`（旧签名仍兼容）。
+  - `kit.qss_k(qss, k)`：通用 px 换算；`ui_qss` 是它的 UI_BASE 版本。
+  - 测试期望值改为 `标准像素 × 档位 × UI_BASE`，`OI_UI_SCALE=1.0` 下同样 39/39 通过。
+  - 实测：设置窗 1172×889、字体 13.5pt、dpr=1.00；气泡宽 315（=210×1.5），桌宠
+    约 112px（=75×1.5），与 v0.8.2 视觉尺寸一致，文字清晰。
+  - 顺手修：添加模块窗口的模板列表不再出现横向滚动条（分隔行缩短 + 关横向滚动条）。
+  - 打包：本机新建 `%LOCALAPPDATA%\oi-packenv`（Python 3.12.10），用户级装 Inno Setup 6；
+    `build_v090.bat` 去掉了写死的旧机器路径。
+
+- 【去掉强制 QT_SCALE_FACTOR=1.5，缩放跟随系统 2026-09-24】（根治）
+  - 实测用户机器：两块屏都是 **100% 缩放**（2560×1440 主屏 + 1080×1920 竖屏在右，
+    y 偏移 −473）。强制 1.5 带来两个问题：
+    ① 所有 UI 在 100% 屏上被 1.5 倍**位图放大**，文字发糊，设置窗最明显；
+    ② Qt5 在缩放因子≠1 时，每块屏逻辑坐标的原点不参与缩放 → 主屏逻辑宽 1707、
+       副屏却从 2560 开始，中间 **853 的空洞**。这就是诊断日志里 `qt_pet` 相邻帧跳
+       853、盘面偏 1280（=853×1.5）的根源。
+  - 改动：`main.py` 不再设置 `QT_SCALE_FACTOR`；保留 `AA_EnableHighDpiScaling`，
+    并加 `HighDpiScaleFactorRoundingPolicy.PassThrough`（125%/175% 按真实比例，
+    不四舍五入）。测试脚本也不再强制 1.5，与实际运行一致。
+    实测去掉后 Qt 逻辑坐标 == Win32 物理坐标，两屏无缝衔接。
+  - 影响：100% 屏上所有界面约为原来的 2/3，文字清晰。嫌小可用设置里「气泡大小/
+    桌宠大小」档位（最高 2.0）调大；以后在高 DPI 屏上 Windows 自己会放大。
+  - 径向菜单的原生对齐代码保留：它在任何缩放下都是物理正确的，今后若接混合 DPI
+    的屏幕（Qt5 那时仍可能不连续）也能兜底。
+
+- 【盘面：可见期间禁止任何 Qt 坐标定位 + 关闭按钮自绘 2026-09-24】
+  - 第二轮日志推翻了上一版的"同屏绑定 + 算术定位"：`qt_menu` 已精确等于
+    桌宠算术目标（2415），`menu_phys` 却仍差 1280；且 `qt_pet.x` 在相邻帧间跳
+    853 逻辑（=1280 物理）而桌宠物理位置是平滑的。结论：强制 `QT_SCALE_FACTOR`
+    + 多屏时，Qt5 每块屏的逻辑坐标原点不按比例缩放，逻辑坐标系**跨屏不连续**，
+    任何 Qt 逻辑坐标定位（`move`/`setGeometry`/`resize`/`setScreen`）都会落到
+    错误物理位置。
+  - 规则（务必保持）：**径向菜单可见期间，位置和尺寸只能走 Win32 原生**
+    `_align_native(logical_size=None)`（`SetWindowPos`，hWndInsertAfter=桌宠，
+    尺寸按桌宠窗口的物理/逻辑比例换算）。`sync_to_pet()` 只调它；
+    `_reposition_geometry()` 在可见时也只调它——此前这里残留的 `self.resize()`
+    会在贴边重排（盘面尺寸变化）那一帧用错误逻辑位置把窗口甩走，这正是
+    "靠近分界线才闪"的触发点。仅在窗口不可见（show 前）才允许 Qt 设尺寸/播种位置。
+  - 关闭/帮助按钮改为自绘 `kit.TitleIconButton(QAbstractButton)`：设置窗的
+    `QPushButton{padding…;min-width…}` 样式会层叠进 QPushButton 把它撑成竖条；
+    QAbstractButton 不匹配该选择器，尺寸固定 30×30。
+
+- 【盘面闪烁根因定位（靠诊断日志）+ 按钮方形化 2026-09-24】
+  - **盘面闪烁的真正根因**：诊断日志给出了决定性数据——
+    `dev` 恒为 **1280 = 1920/1.5**，正好是一个屏幕的**逻辑宽度**；
+    `qt_pet=(2508,-94)` 而 `qt_menu=(1553,-35)`，按桌宠算术推导盘面应在
+    `2508+45-144=2409`，与实际 Qt 值差 856 逻辑 ≈ 1284 物理。
+    结论：**Qt 认为盘面窗口在另一块 QScreen 上**，于是它的逻辑↔物理映射比桌宠
+    整整差一个屏幕宽度；Qt 每帧按自己那份错误映射把窗口摆回去，我们再原生纠回，
+    肉眼就是持续闪烁（此前几轮都在"纠正结果"，没有消除"映射不一致"这个原因）。
+  - 修法：`sync_to_pet()` 先把盘面的 `QWindow.setScreen()` 绑到**桌宠所在的
+    那块 QScreen**，映射一致后用桌宠的 Qt 坐标做**纯算术**定位
+    （`pet.x()+pet.width()//2-margin`），原生 `_align_native()` 只作最后兜底；
+    `_reposition_geometry` 改为复用 `sync_to_pet`，去掉重复的定位分支。
+    实测 30 次移动中盘面 Qt 位置恒等于"桌宠中心−margin"，且两窗口同屏。
+  - 关闭/帮助按钮改为 **32×32 正方形**（原 44×28 视觉偏窄），标题栏加高到 38px。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【弹窗风格彻底统一 2026-09-24】
+  - **深色窗口基类移到 `widgets/kit.py`**：新增 `kit.DarkTitleBar` /
+    `kit.DarkDialog`（无边框 + 自绘标题栏 + 可选「？」帮助按钮 + 44×28 关闭按钮
+    + 拖动 + Esc 关闭）。放 kit 是因为 `widgets/` 下的组件也要用，`pet_gravity`
+    只保留别名 `_DarkDialog = _kit.DarkDialog`，避免两份实现各自漂移
+    （删掉本地副本约 4100 字符）。
+  - **QMessageBox 全部替换**：新增 `kit.confirm(parent, title, text, danger=)`
+    → 返回**布尔**（旧版返回 `QMessageBox.Yes`，调用方写法一并改掉）、
+    `kit.info()` / `kit.warn()`。替换了全项目 **14 处**调用：
+    pet_gravity 10 处（名称重复 / 确认清空插槽 / 关闭所有模块 / 删除内置模块 /
+    导出导入成功失败）、bubble_ui 2 处（模块诊断 / 右键删除模块）、
+    widgets 4 处（todo 清空 / perler 清空 / canvas 清空与 AI 绘画提示 /
+    webchat 打开失败）。各文件不再使用的 `QMessageBox` 导入一并清理，
+    `grep QMessageBox` 在业务代码里已归零。
+    > 唯一保留原生弹窗的是 `main._check_dependencies()`：那是**依赖缺失时的引导
+    > 路径**，此时 PyQt5/kit 可能都不可用，必须用最原始的 QMessageBox/MessageBoxW。
+  - 至此项目内所有窗口风格统一：桌宠 / 气泡 / 径向菜单 / StyledMenu /
+    ConfirmPopup / `_AddTextDialog` 原本就是无边框自绘；本轮把四个对话框
+    （设置 / 模块编辑 / AI 设置 / 添加模块）与所有提示确认弹窗也纳入同一风格。
+  - 实测：确认弹窗点确定返回 True、点取消返回 False；端到端验证"删除内置模块
+    确定则删、取消不删""关闭所有模块""清空插槽"路径正确；三套回归全过
+    （39/39、组件缩放、模板 111/111）。
+
+- 【窗口风格统一 + 盘面闪烁真因 2026-09-24】
+  - **盘面闪到屏幕中间（真因是我上一轮埋的）**：我把"Qt 几何种子"放进了
+    `_align_native()`，而它**每帧都跑**——混合 DPI 下 Qt 坐标持续偏离阈值，
+    于是每帧先用 Qt 逻辑坐标把窗口移到错误物理位置、再被原生 SetWindowPos 纠回，
+    这就是"闪到屏幕中间又闪回"。现在抽成 `_seed_qt_geometry()` 并且**只在窗口
+    不可见时**（show 之前）播种；`_align_native()` 只做原生对齐，不再碰 Qt 坐标。
+  - 同时在 `_align_native()` 加**偏移诊断**：物理偏移超过阈值时往
+    `%TEMP%\\oi_pet_error.log` 记一条（每秒最多一条），含 pet/menu 的物理矩形、
+    期望位置、Qt 坐标与 margin，便于后续定位而不再靠猜。
+  - **窗口风格统一**：`_DlgTitleBar` 新增可选「？」帮助按钮；关闭按钮加宽到
+    **44×28**（原 26×22 太窄），标题栏 34px。`RuleDialog` 与 `SettingsDialog`
+    也改为继承 `_DarkDialog`（内容放进 `self.body`）：至此四个对话框
+    （设置 / 模块编辑 / AI 设置 / 添加模块）全部无边框自绘深色标题栏。
+    `RuleDialog` 原本用系统标题栏的 WhatsThis「？」打开开发文档，改为标题栏
+    帮助按钮（`add_help_button`），删掉 `event()` 里的 `EnterWhatsThisMode` 拦截。
+    注意 `_AddTextDialog` **本来就是**无边框深色弹窗（自带标题），不要套基类，
+    否则会多出一条标题栏；`StyledMenu`/`ConfirmPopup`/提示标签同样早已是自绘深色。
+  - **气泡里 AI 助手标题被裁切**：`ChatPanel.set_header` 原先只给 2px/1px 内边距、
+    标签无最小高度，中文标题底部会被裁掉一点。改为标题栏固定 `kit.row_height()`
+    （已含 CJK 行距余量）+ 标签 `AlignVCenter`。实测 1.0/1.5/2.0 三档标签高
+    15/22/30 均大于文字所需 10/15/20。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【无边框深色对话框 + 盘面几何种子 2026-09-24】
+  - **浮窗拖动后标题栏发白/文字像被选中/关闭按钮消失**：补齐窗口标志后仍复现。
+    真正原因是本项目强制全局 `QT_SCALE_FACTOR`，多显示器混合 DPI 下 Windows 会
+    对原生窗口框做缩放虚拟化，且 Qt 跨屏时可能**重建原生窗口**（新 HWND →
+    DWM 暗色属性丢失 → 白色标题栏）。因此新增 `_DarkDialog` / `_DlgTitleBar`：
+    `Qt.FramelessWindowHint` + **自绘标题栏**（标题 + 关闭按钮 + 按住拖动 +
+    Esc 关闭），`AISettingsDialog` 与 `TemplateGalleryDialog` 改为继承它、
+    内容放进 `self.body`。彻底不依赖原生窗口框。
+    顺带修 `_set_dark_titlebar` 的真 bug：`DwmSetWindowAttribute` 返回 HRESULT
+    而**不抛异常**，原先 `try/break` 会在属性 20 不受支持时静默失败（标题栏保持
+    白色），现在判 `hr == 0` 才 break，否则回退属性 19。
+  - **API Key 下方开关语义不明**：文案改为「显示 API Key 明文」，加 tooltip
+    说明（默认圆点隐藏，勾选后显示明文便于核对），并缩进与上方字段标签列对齐。
+  - **盘面"跳到画面中心"（真因）**：上一版把位置改成**只用原生 SetWindowPos**，
+    导致 Qt 内部几何从未被更新；Qt 因跨屏 DPI 变化重建原生窗口时，会按它自己那份
+    陈旧/默认几何摆放，而 Qt 对无有效几何的窗口默认**居中于屏幕**——这正是
+    "跳到画面中心"。修法：`_align_native()` 在原生定位前先把 Qt 几何"种"到桌宠
+    附近（仅在偏离超过一个桌宠身位时补一次，避免与原生定位来回拉扯，带
+    `_seeding` 递归保护）；`show()` 之后也补一次 `_align_native()`。
+  - 三套回归全过：39/39、组件缩放、模板 111/111；冒烟验证两个无边框对话框的
+    拖动/关闭/完整业务流程（画廊生成规则、AI 设置保存模型与协议）均正常。
+
+- 【AI 设置：拉取模型列表 2026-09-24】
+  - 新增 `status_monitor.list_llm_models(base_url, api_key, api_style=)`：
+    `GET {base}/models` 拉取该 Key 可用模型。OpenAI 兼容与 Anthropic 兼容的响应
+    结构一致（`{"data":[{"id":...}]}`），Ollama 原生的 `{"models":[{"name":...}]}`
+    也一并兼容；返回 `(ok, [模型名], 提示)`，HTTP 错误会带回状态码与响应片段。
+  - AI 设置窗：「模型」从单行输入框改为**可编辑下拉框** + 「拉取模型」按钮。
+    字段顺序调整为 接口地址 → API Key → 模型（拉取需要先有 Key）。
+    拉取在后台线程进行（`_models_done` 信号回主线程），完成后填充下拉并自动
+    展开；原先填的模型若仍在列表中保持选中，否则选第一个；仍可直接手输模型名。
+  - 实测：三种响应格式解析正确、空列表/缺地址/HTTP 401 都有明确提示且按钮恢复，
+    拉取后保持原选中、手输仍生效、保存写入正确模型。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【浮窗标题栏 + 展开次序 + 盘面同帧跟随 2026-09-24】
+  - **浮窗拖动后标题高亮、关闭按钮消失**：三个对话框（SettingsDialog /
+    AISettingsDialog / TemplateGalleryDialog）都只给了
+    `Qt.Dialog | Qt.WindowCloseButtonHint`。Windows 上关闭按钮依赖**系统菜单
+    标志**，缺 `WindowSystemMenuHint`/`WindowTitleHint` 会画不出关闭按钮、
+    标题栏也渲染异常。三处统一补齐为
+    `Qt.Dialog | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint`。
+  - **贴边重排后展开/收回次序乱**：递进延迟原先用**按钮索引** `i`，贴边重排后
+    索引与弧上实际排列顺序不一致。新增 `_update_anim_ranks()`：按各按钮相对
+    `_arc_start` 的角度排出动画次序（弧的一端→另一端），
+    `_anim_rank_of(i)` 供两处 stagger 使用；`show_menu` 与 `reflow` 里都会重算。
+    实测重排后次序为 `[6,0,1,2,3,4,5]`（按弧序而非索引序）。
+  - **分界线附近盘面仍甩飞又闪回**：盘面此前只在帧循环（16ms 后）跟随，桌宠在
+    分界线附近缓慢移动时 Qt 会因"窗口换屏"重算几何把盘面甩走，要等下一帧才纠回，
+    于是看到一次跳走+闪回。现在补两条同步：
+    ① `GravityPet.moveEvent` → 桌宠一移动就在**同一个事件**里 `sync_to_pet()`；
+    ② `RadialMenu._hook_screen_changed()` 监听 `QWindow.screenChanged`，换屏瞬间
+    立刻原生对齐。实测只调 `pet.move()`（不跑帧循环）时盘面偏差已为 (0,0)。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【物理坐标排布 + 接口协议 + 模块列表交互 2026-09-24】
+  - **分界处按钮仍不重排（真因）**：判定一直用 Qt 逻辑坐标，而混合 DPI +
+    全局 `QT_SCALE_FACTOR` 下 Qt 逻辑坐标与物理布局不一致——Qt 认为按钮在本屏内，
+    物理上却已跨到对面屏。新增 `RadialMenu._native_owner_work()`：用 Win32
+    `GetWindowRect` + `MonitorFromPoint` + `GetMonitorInfoW` 取**物理**工作区，
+    并由桌宠窗口的物理/逻辑宽度比得出 dpr；`_angle_blocked` 在 Windows 上改用
+    物理坐标判定（非 Windows / 取不到时回退原 Qt 逻辑）。朝向点按 `snapped_edge`
+    偏移一个身位，取到的才是桌宠倾倒进去的那块屏。
+  - **接口协议（用户指正）**：Anthropic 与 OpenAI 是两套**通用接入规则**，不是
+    单一服务商。新增 `AI_API_STYLES`，`AI_PROVIDER_PRESETS` 增加协议字段；
+    AI 设置窗新增「接口协议」下拉（选服务商自动带出，可手改），
+    预设增加「自定义（OpenAI 兼容）/（Anthropic 兼容）」。协议存入
+    `ai_profile["api_style"]`，经 `_merge_ai_profile` 下发；
+    `_apply_llm_auth(req, base, key, style)` 按协议加头（未给出时按 URL 兜底推断，
+    兼容旧配置），`ping_llm` 也带上协议。
+  - **模块列表交互**：自定义模块删除**不再弹确认**（取消设置窗即可撤销）；
+    内置模块仍确认一次（删除会记入 hidden_builtins 不再自动加回）。
+    `_RuleListWidget` 支持 **Delete / Backspace 键**删除当前模块。
+  - **添加模块窗口顺序**：改为 AI 助手 → 自定义模块（高级）→ 分割线
+    「──── 以下为预设模板 ────」→ 各预设模板。分割线为不可选中项
+    （`Qt.NoItemFlags`），选中与确定逻辑都做了守卫。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【按钮朝向按吸附屏 + 盘面钉在桌宠下一层 2026-09-24】
+  - **朝向的正确定义（用户确认）**：桌宠**倾倒的方向就是朝向**——吸附时它朝
+    所吸附那块屏的内侧倾倒，按钮就该排在那块屏内。此前几版都是事后从坐标
+    反推屏幕（中心点 / 朝向偏移点 / 重叠面积），贴边时桌宠大半在屏外，
+    怎么推都可能取到隔壁屏，所以方向时对时错。
+    现在在**吸附发生的那一刻**把屏幕记进 `pet._snap_screen`
+    （`_check_edge_snap` 里 `_screen_of(self)`），`RadialMenu._owner_screen()`
+    在 `snapped_edge` 非空时直接用它；未吸附才回落到"重叠面积最大"。
+    新增 `_screen_of()` 助手（`_screen_geo_of` 改为基于它）。
+  - **盘面闪烁的根因**：Qt 侧 `setGeometry` 与原生 `SetWindowPos` **两套定位
+    同时生效**，混合 DPI 下各自算出不同位置，逐帧互相覆盖 → 盘面在画面中心与
+    桌宠之间反复跳。现在分工明确：**尺寸归 Qt，位置只归原生**
+    （`_reposition_geometry` 只 `resize` + 调 `_align_native()`；
+    `sync_to_pet()` 也只走原生）。
+  - **盘面钉在桌宠下一层**：`_align_native()` 用
+    `SetWindowPos(hm, hp, ...)`（hWndInsertAfter = 桌宠窗口），使盘面固定位于
+    桌宠窗口的正下一层，两者保持固定的层级与位置关系；配合 `moveEvent` 自纠，
+    任何外力挪动都会被立刻纠回。
+  - 实测：吸附屏被正确记录，贴左缘时正右可用/正左被挡、贴右缘完全反之；
+    吸附动画 60 帧内盘面与桌宠偏差恒为 (0,0)，静止后 40 帧位置唯一（不闪烁）。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【分屏归属判定 + 盘面自纠 2026-09-24】
+  - **按钮排到反方向（真根因）**：判据一直用"某个点落在哪块屏"——桌宠压在
+    分界线上时，中心点/偏移点都可能落到对面屏，方向就反了。改为
+    `RadialMenu._owner_screen()`：取**与桌宠矩形重叠面积最大**的那块屏，
+    等价于"桌宠身体大部分在哪块屏，按钮就排哪块屏"。该判据与用户两张反例
+    截图均吻合（此前的中心点判据两张都错）。
+  - **分界线被误判为外边缘 → 在缝上吸附**：`_edge_is_outer` 只探测边的**中点**，
+    两块显示器高度/垂直偏移不同时（用户就是这种布局），中点落在邻屏范围外，
+    分界线被当成外边缘，桌宠贴在两屏中间并触发倾斜。改为"整条边向外一薄条"
+    与其它屏幕求交。实测：右侧存在垂直偏移的邻屏时，right 边正确判为内部分界。
+  - **盘面偶发脱离（补最后一道）**：除了帧循环的 `sync_to_pet()`，再给
+    `RadialMenu` 加 `moveEvent` 自纠——窗口被 Qt/窗管在我们设完几何之后挪走时
+    （跨屏 DPI 换算、显示器热插拔、任务栏变化）立刻用原生坐标纠回，带
+    `_aligning` 递归保护。实测外部强行 `move()` 后偏差自动回到 (0,0)。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【分屏朝向判定 + 盘面原生对齐 2026-09-24】
+  - **双屏之间按钮排到反方向（根因）**：贴边时桌宠**大部分藏在屏幕外**，只露
+    一小条，此时窗口**中心点**往往落在隔壁屏幕上 → `screenAt(中心)` 取到对面屏，
+    按钮被约束到对面屏，正好是反的。新增 `RadialMenu._facing_ref_point()`：
+    按 `snapped_edge` 把参考点朝"露出来"的一侧偏移 `pet_size*0.9`
+    （贴左缘→朝右、贴右缘→朝左，未贴边则用中心），`_angle_blocked` 改用它取屏幕。
+    实测贴左缘时 0°可用/180°被挡，贴右缘时反之。
+  - **盘面仍脱离桌宠（根因）**：此前每帧校验比较的是 Qt 侧 `rm.x()` 与期望值，
+    但混合 DPI + 全局 `QT_SCALE_FACTOR` 下 **Qt 会"自认为放对了"而窗口实际
+    在另一块屏**，于是该校验永远不触发。新增 `RadialMenu._align_native()`：
+    用 Win32 `GetWindowRect`/`SetWindowPos` 按**物理像素**把盘面中心对齐到桌宠
+    中心，完全绕开 Qt 的坐标换算；`sync_to_pet()` 把 Qt 侧与原生对齐合并，
+    帧循环每帧调用（实测 0.0025 ms/次）。`_reposition_geometry` 也补了
+    `winId()` 强制原生化——此前 `windowHandle()` 在 `show()` 前为 None，
+    上一版的 `setScreen` 其实从未生效。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【移除拖尾 + 分屏菜单修正 2026-09-24】
+  - **拖尾功能整体移除**（用户评估性价比低）：删除 `_TrailWindow`、
+    `_make_ghost_silhouette`、`_icon_opaque_size`、`_current_frame_pixmap`、
+    GravityPet 的 `_trail_*` 方法组、设置窗的「拖尾」开关/时长滑块及其回调、
+    `trail_enabled`/`trail_duration` 两个 settings 键、以及 mousePress /
+    mouseMove / mouseRelease / `_update_frame` / `closeEvent` / `recenter` /
+    设置窗快照与取消回退里的全部调用点；`QLinearGradient`/`QPolygonF` 导入
+    一并清理。共减少约 21000 字符，`grep trail` 零残留。
+    > 历史记录里关于拖尾的条目仅作背景保留，代码已不存在。
+  - **贴边在分屏中间时按钮排到了对面屏幕**：`_angle_blocked` 此前只要求
+    "能完整放进**任意一块**屏幕"，于是分界处的按钮整体跑到隔壁屏。改为要求
+    完整落在**桌宠所在的那块屏幕**内——越界、压分界线、跑到对面屏都算放不下，
+    按钮因此排到桌宠朝向的这一侧。实测贴右缘时 0°被挡/180°可用，贴左缘反之。
+  - **贴边时盘面跳到另一块屏幕中间**：多显示器 + `QT_SCALE_FACTOR` 下，Qt5 若
+    窗口当前归属的 QScreen 与目标位置不在同一块屏，`setGeometry` 会按错误的屏幕
+    换算。`_reposition_geometry` 改为先 `windowHandle().setScreen(桌宠所在屏)`
+    再设几何，并**回读校验**，偏差 >2px 时重设一次。
+    （离屏环境复现不了该 Qt 行为，此修复需实机验证。）
+
+- 【多屏全屏规则 + 拖尾打磨二轮 2026-09-24】
+  - **副屏桌宠被主屏全屏误隐藏**：`is_foreground_fullscreen()` 用
+    `GetSystemMetrics(0/1)`（**主屏**尺寸）和 `left<=0 and top<=0`（主屏原点）
+    判定，主屏全屏看视频时副屏桌宠也被藏掉。改为
+    `foreground_fullscreen_screen()` —— 按前台窗口中心找到它所在的 QScreen，
+    与**那块屏幕**的 geometry 比较；`_check_fullscreen` 只在
+    "全屏窗口与桌宠在同一块屏幕"时才隐藏。旧 `is_foreground_fullscreen()`
+    保留为兼容包装。
+  - **拖尾跟不上**：采样只发生在鼠标事件里，拖快时事件被系统合并 → 尾巴落在
+    桌宠后面。新增 `set_head()`，`_tick_trail` 每帧把头部钉到桌宠实时中心。
+    另修 `_live_points` 的尾长截断：超长时改为**按剩余长度插值出末点**，
+    而不是整段 `break`——否则快速拖动（头部离最近采样点很远）会把尾巴整条砍没。
+  - **尾迹崎岖不平**：根因是鼠标事件时疏时密 + 逐点宽度突变 + 折线轮廓。
+    现在 `_build_path` 先**按固定间距重采样**（不受事件密度影响），再对
+    位置和半宽各做 2 遍移动平均，最后用**二次贝塞尔**连接边缘（不再是折线）。
+  - **头部形状不像桌宠**：锥形带头部是平切口。重新引入
+    `_make_ghost_silhouette()`，在头部贴**一张**图标剪影塑形。注意只贴一张——
+    多张半透明剪影叠加会累积透明度，重叠处形成鳞片状硬边（实测比平切口更难看）。
+  - 性能：1000 次拖动（采样+钉头+tick+重绘+跨屏跳变）**0.208 ms/次**，
+    窗口尺寸受控，三套回归全过（39/39、组件缩放、模板 111/111）。
+
+- 【分界线排布 + 拖尾打磨 2026-09-24】
+  - **两屏分界线上按钮被切开**：`_angle_blocked` 之前用"所有屏幕并集"判定，
+    结果压在分界线上的按钮被判为可用，实际会被物理屏幕缝切成两半。改为
+    **按钮外接框必须完整落在某一块屏幕的 availableGeometry 内**——横跨分界
+    视为放不下，交由既有重排逻辑挪到同一侧。实测：居中时 0/8 方向被挡，
+    贴右缘时 3/8 被挡（触发重排）。
+  - **松手后拖尾慢半拍**：此前尾巴要等采样点各自活满 `duration` 才消失。
+    新增 `begin_fade()`，`mouseReleaseEvent` 里触发，整体透明度在
+    `FADE_OUT=0.12s` 内归零，`prune()` 返回 False 后隐藏窗口。
+  - **转折/重合处破面**：根因是 `drawPolygon` 默认 **OddEvenFill**，带状路径
+    自交处被判为"洞"。改用 `QPainterPath` + **WindingFill**；另加三重平滑：
+    路径移动平均、按转折锐度收窄半宽（宽度超过转弯半径必然自交翻面）、
+    `_live_points` 在"两段都够长 + 接近完全反向"处截断折返。
+    实测：平滑/手抖路径 30/30 点全保留，急折返 10/29 被截断成收尖楔形。
+  - **拖尾起始宽度按图标像素**：新增 `_icon_opaque_size()`（`createAlphaMask`
+    + `QRegion.boundingRect`，带缓存）量图标实际不透明像素范围，头宽取
+    `min(w,h)*0.92`。实测 42.3px vs 旧算法 31.5px（`pet_size*0.42`），不再偏窄。
+  - **性能**：路径只与坐标有关 → 按 `(点数,首尾坐标,窗口原点)` 缓存 `QPainterPath`，
+    位置不变时重绘 **0.05 ms/帧**；采样点上限 56。压力测试 1000 次拖动
+    （含采样+tick+重绘+随机跨屏跳变）**0.130 ms/次**、无崩溃、窗口尺寸受控。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【跨屏拖拽飞走修复 + 托盘回中 2026-09-24】
+  - **快速跨屏拖拽桌宠飞走（严重）**：`mouseMoveEvent` 原用
+    `self.mapToGlobal(event.pos() - self.drag_offset)` —— 这是基于"上一次 move
+    之后的窗口位置"的**相对累积**换算，每帧的取整/DPI 映射误差会逐帧放大，
+    跨不同缩放的屏幕时桌宠会越飞越远直至跑出所有屏幕再也找不到。
+    改为绝对坐标：`event.globalPos() - self.drag_offset`（按下时记录的窗口内
+    偏移），不依赖当前窗口位置，零累积。实测 300 次拖动偏差 **0 px**。
+  - 兜底：新增 `_clamp_to_desktop()`，把窗口左上角限制在所有屏幕并集内，
+    极端坐标（±99999）也会被钳回桌面，物理上不可能再"拖丢"。
+  - **托盘新增「回到中央」**：`GravityPet.recenter()` 把桌宠移回**鼠标所在屏幕**
+    中央并显示，同时清掉吸附/倾斜/拖尾残留、收起径向菜单；
+    `main.DesktopPetApp._center_pet()` 接到托盘右键菜单（显示/隐藏之下）。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【拖尾改矢量渐变 2026-09-24】
+  - **拖尾第三版：纯矢量渐变带**（替换"逐帧拷贝剪影"方案）。前两版的
+    偏移/乱飞/闪退都源于"贴位图"这条路线：①按窗口左上角贴图，而桌宠本体是
+    **居中带阴影留白**绘制的（`PET_SHADOW_MARGIN`），所以拖尾整体偏移；
+    ②窗口取整条路径的包围盒，跨屏或大跨度拖动时膨胀成超大半透明窗口 →
+    乱飞、卡顿甚至闪退。
+    现在 `_TrailWindow` 沿最近路径构造一条**宽度由粗到细的带状多边形**，用
+    `QLinearGradient` 从实到透明一次填充（成本恒定，无逐帧位图）。
+  - 三条防御：采样点用**图标中心**（`mapToGlobal(中心)`，彻底消除偏移）；
+    尾长按**像素封顶**（`pet_size*2.2`）且窗口尺寸硬上限 `MAX_WIN=1600`，
+    超限当帧不显示；`push()` 检测坐标跳变（>尾长×4，即跨屏/瞬移）时**清空重建**，
+    尾巴不会横跨屏幕。
+  - 实测：采样点 == 图标中心；长距拖动包围盒稳定在 195×45；坐标突变后点数
+    60→1；**压力测试 960 次随机拖动（含跨屏级跳变）无崩溃**，窗口最大边长
+    195px。离屏渲染 PNG 确认为锥形渐变带（头实尾透、尾端收尖）。
+  - 清理：`_GhostWindow`、`_make_ghost_silhouette`、`_trail_edge_pixmap`、
+    `_TRAIL_MAX` 等上一版遗留代码已删除。
+  - 可调参数：带宽 `pet_size*0.42`、尾长 `pet_size*2.2`、初始透明度 0.5、
+    收窄曲线 `k**0.75`、颜色 `QColor(150,225,255)`。
+
+- 【拖尾改连贯 + 文案精简 2026-09-24】
+  - **拖尾重构为单窗口整条绘制（关键）**：先前给每一节残影开一个顶层窗口
+    （最多 26 个），拖动时反复创建/合成窗口，在 Windows 上明显卡顿，且每节是
+    硬边拷贝、观感离散。改为 `_TrailWindow` —— **一个**无框透明窗口覆盖整条
+    尾巴的包围盒，`paintEvent` 里沿采样路径插值绘制剪影并按 `(1-age)^2` 叠加
+    透明度，形成流星式连续渐隐。拖动时只 `push()` 一个坐标（0.012 ms/次），
+    采样点上限 72、每帧绘制上限 72（超出等距抽稀），实测 1.16 ms/帧。
+    `_tick_trail` 裁掉过期采样点并重绘，尾巴空了自动隐藏窗口。
+  - 剪影仍由 `_make_ghost_silhouette()` 生成（只染图标自身 alpha、不外扩，
+    绝不溢出图标边缘）；拖尾窗口 `lower()` + 首次显示后 `pet.raise_()`，
+    始终位于桌宠之下，不盖住桌宠本体。
+  - **设置窗排版**：「拖动残影」改名「拖尾」，与「标签」（原「显示标签」）
+    合并到确定/取消那一行，省掉一整行竖向空间；时长滑块收窄到 72px。
+  - **操作说明与模块提示精简**：底部说明的模块一行改为
+    「＋添加从模板库挑…／AI 设置配一次大模型…／模块行右键刷新启停排序删除」；
+    模块列表标题 tooltip 同步更新类型列表（补 disk，去掉过时表述）。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【布局助手 bug + 残影 + 丝滑弹出 2026-09-23】
+  - **`kit.row/col` 丢弃 QGridLayout（重要通用 bug）**：两个助手只 `isinstance`
+    判断 `QHBoxLayout/QVBoxLayout`，用 `QGridLayout` 的组件会被**静默丢弃**——
+    这正是「计算器只显示输入框、20 个按钮全不见、无法点击」的根因。改为接受任意
+    `QLayout`。凡是用网格布局的组件都受益。（教训：`test_templates.py` 只验证
+    "渲染不抛异常"，漏掉了"内容是否真的加上"。）
+  - **尺寸滑块点击即跳到最大档**：QSlider 默认点击槽体是按 pageStep 翻页，档位
+    只有 4 档时一点就冲到头。新增 `_StepSlider`（点击/拖动位置直接换算成最近档位），
+    气泡/桌宠大小两个滑块都换用它。
+  - **顶栏三控件垂直居中**：钉住/关闭按钮原用 "○●✕" 文字字形，SimHei 字形上下
+    留白不对称，小档位下与滑块明显不在一条线 → 改为 `_HeadIconButton` 几何绘制
+    （按控件中心画圆环/叉，带 hover 底）。定位改为按视觉标题带 `[1, _HEAD_H]` 的
+    **整数**中心对齐：先前用 `round()` 时银行家舍入让 2.5→2 而 3.5→4，滑块低 1px。
+    实测四档中心一致。
+  - **气泡弹出不再从远处飞来**：`_do_show` 算出目标位后直接 `show()`，窗口会先
+    出现在上一次的旧位置（可能在屏幕另一侧），再被 `_smooth_move_to` 挪过来。
+    改为显示前先 `move(tx,ty)` 并清空 `_mv_from`，调整气泡大小的重建路径同样受益。
+  - **拖动残影（新功能）**：新增 `_GhostWindow` —— 桌宠是独立小窗口、窗口外无法
+    绘制，所以残影用同款无框透明置顶窗口在旧位置呈现，图形复用拖入高光的
+    `_make_pixel_halo()` 像素边缘描边，按时长淡出后自毁。`_spawn_trail_ghost`
+    按位移+时间双重节流、上限 12 个；`_tick_trail` 挂在桌宠常驻帧循环，
+    `closeEvent` 回收。设置窗预览区下方新增「拖动残影」开关 + 时长滑块
+    （0.05–1.00 秒，默认 0.3），实时生效、取消时回退（`_pre_dlg_trail`）；
+    新增 settings 键 `trail_enabled` / `trail_duration`。
+  - 三套回归全过：39/39、组件缩放、模板 111/111。
+
+- 【右键回归 + 多屏 + 对齐 + 模板验证 2026-09-23】
+  - **模块行右键菜单失效（回归）修复**：模块行是真实子控件，右键先落在
+    行/卡片/文本/按钮上，仅靠 Qt 事件冒泡在部分控件被截留 → "禁用/上下移"点不到。
+    新增 `bubble_layout._forward_ctx_menu()` 并挂到 `_HandleLabel/_ScrollText/
+    _ModuleCard/_LTextRow/_LBtnRow/_LWidgetRow`，把右键显式转交气泡本体。
+    实测 6/6 次子控件右键都能弹出菜单。
+  - **径向菜单仍跳屏修复**：上一版把同步放在菜单自己的 `_anim_timer` 里，但它在
+    开合动画结束后会 stop → 之后盘面不再跟随。改到桌宠常驻 16ms 帧循环
+    `_update_frame` 中同步盘面几何。
+  - **两屏交界行为**：新增 `_virtual_geo()`（所有屏幕并集）与 `_edge_is_outer()`。
+    `_check_edge_snap` 只在**真实外边缘**吸附——两屏交界不是边缘（那边还有可见
+    桌面），此前一靠近交界就被吸住导致无法跨屏；`_angle_blocked`/`_empty_hint_pos`
+    改用屏幕并集，按钮可跨交界分布到两侧。
+  - **气泡排版对齐**：顶栏钉住/关闭/透明度滑块此前 y 各自硬编码（btn=bs(1)、
+    slider=bs(2)）且未按标题栏高度居中 → 改为按 `_HEAD_H` 统一垂直居中，
+    实测 1.0/1.25/1.5/2.0 四档中心线一致。无框架标题的组件行（画布/拼豆/统计/
+    Token）卡片上下内边距归零：此前组件按 row_height 算好的 15px 被上下各 1px
+    边距挤成 13px，自带标题栏里的「展开」按钮因此嵌不正。
+  - **模板验证**：新增 **`test_templates.py`**（111 项）——对全部 22 个模板逐一验证
+    build → 规则合法（source.type 已知）→ 渲染契约 → 组件真实加载 → 组件真实渲染
+    → 实际取数。全部通过；计算器等组件经实测可用（1+2=3、9×9=81）。
+    以后加模板必须先过这个测试。
+  - 三套回归：`test_bubble.py` 39/39、`test_components_scale.py` 全过、
+    `test_templates.py` 111/111。
+
+- 【模块类型扩充 + 多屏 + 排版 2026-09-23】
+  - **设置按钮裁切修复**：左栏固定 310px 放不下 5 个按钮 → 紧凑 padding + 按文字宽度
+    设 `setMinimumWidth`；去掉 🤖 emoji（SimHei 无 emoji 字形会渲染成豆腐块），
+    画廊卡片同样改用「分类 + 名称」纯文字。
+  - **模块类型扩充到 22 个**：新增组件类模板（notes/calc/tomato/health/launcher/
+    tokenmeter/canvas/perler，经 `_widget_template()` 生成，code 固定属安全模板）
+    与数据源模板（hitokoto 每日一言 / exchange 汇率 / anniversary 纪念日 /
+    disk 磁盘 / json_api 取字段）。为此后端补：`clock` 新增 `days`/`date` 模式、
+    新增 `disk` source 类型（`_fetch_disk`，已注册进 `_KNOWN_SOURCE_TYPES` 与分发）。
+    画廊扩到 23 张卡片（22 模板 + 自定义），全部实测可生成规则。
+  - **AI 服务商扩充**：新增 Anthropic Claude（走其 OpenAI 兼容端点）、llama.cpp
+    本地（llama-server:8080）、LM Studio 本地。新增 `_apply_llm_auth()` 统一认证头，
+    对 anthropic.com 额外附 `x-api-key` + `anthropic-version`；`ping_llm`/`_stream_sse`/
+    `_llm_request_msg` 三处共用。本地服务商自动填占位 Key（免去"为何必须填 Key"困惑）。
+  - **多屏修复**：新增 `_screen_geo_of(widget)`（取所在屏幕，屏外时取最近屏）。
+    `_check_edge_snap` 等原先用 `primaryScreen()`，桌宠拖到副屏时 `rd` 变大负数被
+    误判为"贴主屏右缘"→强制吸回主屏，这是"拖到副屏就跳回来"的根因；连同解除吸附
+    判定、`_empty_hint_pos`、`_angle_blocked` 一并改为按所在屏。径向菜单 `_tick_anim`
+    每帧把盘面几何同步到桌宠中心，修复"贴两屏交界时盘面与桌宠分离"。
+  - **气泡排版对齐**：组件在模块卡片 5px 内边距之上又加自己的横向内边距
+    （webchat 4px → 实际 9px），导致按钮比文本行的值多缩进、右边缘不齐 →
+    webchat/notes/counter 的横向 margins 归零，横向留白统一由卡片控制；
+    三处标题标签显式 `Qt.AlignLeft | Qt.AlignVCenter`，不再依赖默认对齐。
+  - **模块编辑窗表单化**：`RuleDialog` 新增「常用字段」表单（`FORM_FIELDS` 按
+    source.type 显示：http=url/transform、llm=model/system_prompt、clock=mode/target/
+    date、static=text、disk=drive、script=lang/ui），与下方 JSON **双向同步**
+    （`_rebuild_form`/`_form_to_json`，JSON 非法时不覆盖用户手写内容；`transform`
+    等顶层字段正确写到顶层）。普通用户不必再手写 JSON，高级字段仍可在 JSON 改。
+  - 回归 39/39 + 组件缩放全过；冒烟：径向菜单绘制/几何同步、`_screen_geo_of`、
+    边缘吸附、气泡模块行渲染、编辑窗表单双向同步、23 张卡片生成 —— 均通过。
+
+- 【统一 AI + 可视化建模块 2026-09-23】
+  - **统一 AI 大模型配置**：新增 `settings['ai_profile']`（provider/base_url/model/
+    api_key/system_prompt），一处配好、所有 AI 功能共用。`status_monitor._ai_profile()`
+    读取它，`_llm_source_cfg()` 优先用它（绘画/工具/建模块-json）；`_merge_ai_profile()`
+    在 `RuleProvider._source()`（llm 类型唯一入口）对**没配可用 key 的 llm 模块**整体
+    继承 profile 的 key+端点+模型（含占位 key 的内置「AI 助手」），自带有效 key 的模块
+    不受影响。新增 `AISettingsDialog`（服务商预设 `AI_PROVIDER_PRESETS`
+    DeepSeek/豆包/Kimi/GLM/MiMo/Ollama/自定义 + 字段 + `ping_llm` 测试连接）；设置窗
+    模块区新增「🤖 AI 设置」按钮。
+  - **AI 建模块权限**：`allow_ai_exec_modules`（默认 False）做成 AI 设置里的勾选框。
+    门禁细化：安全模板（counter/todo/stats，脚本 code 由模板写死）AI 始终可建；只有
+    AI 提供**任意 code 的 script / file** 模块才需勾选开关（防注入 RCE）。
+    门禁逻辑移到 `_add_rule(rule, from_template=)`，模板路径传模板名放行安全模板。
+  - **可视化模板添加向导**：新增 `TemplateGalleryDialog`（卡片：AI助手/时钟/倒计时/
+    天气/计数器/待办/统计/固定文本/网页接口/自定义-高级）。设置窗「＋添加」改为先开
+    画廊：选卡片→填少量参数→一键生成模块，选「自定义(高级)」才进旧 JSON 编辑器
+    `RuleDialog`。`load_settings` defaults 补 `ai_profile`/`allow_ai_exec_modules`
+    两键（否则被 `if k in defaults` 过滤丢弃）。
+  - 回归 39/39 + 组件缩放全过；离屏冒烟：AI设置预填/保存/开关、画廊生成倒计时/
+    AI/http/自定义、SettingsDialog 构造、占位 key 继承统一 profile —— 均通过。
+  - **未做（下一步）**：模块「编辑」窗口仍是单个 JSON 文本框（`RuleDialog.cfg_edit`），
+    尚未做按 source.type 的表单化编辑（add 已由画廊友好化，edit 待做）。
+
+- 【交互/画质优化 2026-09-23】
+  - **尺寸实时预览**：设置里拖「气泡大小/桌宠大小」滑块时本体**实时**缩放
+    （`SettingsDialog` 接收 `pet` 引用，`valueChanged`→`_live_apply_scales`
+    直接写 `pet.settings` 并 `_apply_pet_settings()`）；取消/关闭窗口自动回退到
+    打开前档位（`_pre_dlg_scales` + `_on_settings_finished` 的 reject 分支），
+    接受才 `save_settings` 持久化。
+  - **图标锯齿/错位修复**：径向菜单与预览窗改为用 256px 高分源**按宽高比 fit
+    直接画进目标矩形**（`p.drawPixmap(QRectF, pm, QRectF)` + `SmoothPixmapTransform`），
+    让 QPainter 在物理分辨率下一次性平滑降采样，消除"先缩逻辑小图再被
+    `QT_SCALE_FACTOR=1.5` 放大"的锯齿；浮点居中修正整数截断导致的图标与白框错位。
+    `PreviewWidget._slot_icon` 相应改为缓存 256 高分源（键为 (icon,path)）。
+  - **右键菜单出屏修复**：`StyledMenu.exec_` 加屏幕可用区钳制（复用
+    `ConfirmPopup` 的 `screenAt`+`availableGeometry` 范式），桌宠贴边时菜单
+    不再跑到屏幕外。
+  - 回归 39/39 + 组件缩放全过；离屏 UI 冒烟验证：径向菜单绘制、实时缩放
+    75→150→93、取消回退 150→75、菜单越界坐标钳回屏内。
+
+- 【稳定性加固 2026-09-23】稳定性审查后修复 P0/P1：
+  - **配置原子写 + 损坏恢复**：`pet_gravity.save_settings` 改为临时文件 +
+    `os.replace` 原子替换、成功后刷新 `pet_settings.json.bak`；`load_settings`
+    主文件解析失败时回退 `.bak`（并把损坏文件另存 `.corrupt` 留证），不再静默
+    清零丢配置。新增模块级 `_SETTINGS_LOCK`（RLock），`status_monitor.PetAPI.
+    mutate_settings` 复用它，使 UI/AI 工具的"读-改-写"跨线程串行，消除并发丢更新。
+  - **AI 建模块安全门禁**：`status_monitor._add_rule` 拒绝 AI 自动创建
+    `script`/`file` 模块（防 prompt-injection 驱动的本地代码执行/文件外泄）；
+    用户确需时手动在设置里添加，或置 `allow_ai_exec_modules=true` 解除。
+  - **气泡内存/UI 泄漏**：`StatusBubble.prepare_for_rebuild` 断开全局
+    `_tool_bridge` 连接并停掉全部常驻定时器，缩放热重建时 `deleteLater` 旧气泡，
+    消除"僵尸气泡"持续轮询/起线程；`_BubbleTip` 认父，随 ChatPanel 一起销毁。
+  - **对话并发/停止**：`ChatPanel._send` 与 `_send_chat` 增并发守卫（回复在途时
+    不再起第二个 worker，防流式交错/停止按钮失效）；`_stop_chat` 立即回收
+    `_chat_pending`/`_stream_acc` 并 `set_thinking(False)`，provider 不响应中止时
+    模块也不再永久停更、行不再永远转圈。
+  - **第二批（性能/健壮性）**：网络响应加字节上限 `_MAX_RESP_BYTES=8MB`（防超大
+    响应 OOM）；失败退避封顶修正为真正的 300s（`module_core.py` exponent 6，原 160s）；
+    三个高频 `paintEvent`（GravityPet/RadialMenu/PreviewWidget）改委托 + try/finally
+    保证 `QPainter.end()`（防"Painter already active"花屏，兼修中途 return 漏 end）；
+    `PreviewWidget._slot_icon` 按 (icon,path,size) 缓存图标（预览窗 60fps 不再每帧
+    读盘 + `extract_exe_icon`）；提醒定时器加注册表 + 最小间隔 10s + 数量上限 20 +
+    `cancel_all_reminders`（防 AI `every=1` 堆线程）；`main.py` 退出清理新增取消提醒 +
+    清理 `oi_chat_*`/`oi_paste_*` 临时图片。
+  - 回归：`test_bubble.py` 39/39、`test_components_scale.py` 全过；离屏冒烟测试
+    （实例化 GravityPet + 重绘 + 气泡热重建）通过；原子写/门禁/提醒护栏的临时验证
+    脚本均已跑通（未入库）。**后续待办**：~380 处静默 except 的关键路径日志化、
+    `_stream_sse` 慢速涓流整体 deadline、内置规则浅拷贝改 deepcopy（`load_settings`
+    的全局可变状态隐患）。
+
+- 【模块架构 v0.8 2026-08-29】新增 `module_core.py`：统一版本号、规则防御归一化、
+  稳定 ID、`ModuleSpec`/`ModuleView` 和动作/文本/组件/对话视图契约。抽出
+  `ModuleScheduler` 管理首次加载、间隔、并发去重、失败计数和指数退避
+  （5/10/20/40…最高 300 秒）；修复规则成功刷新后旧错误不清除的问题。
+  聚合AI迁移为通用动作行契约（`ui=webchat` 或 `action=webchat`），旧配置兼容。
+  设置窗口新增版本号显示，托盘和 exe 元数据升级到 v0.8.0。气泡回归现为 36 项。
+- 【启动热修 2026-08-29】修复 `_refresh_impl` 中普通规则无交互组件时
+  `_t` 未定义导致的启动崩溃；恢复普通模块标题/内容 fallback，并补充启动期
+  回归用例。恢复 `ui=webchat` 的“打开”按钮动作行；正常模块不再常驻绿色
+  健康点，圆点仅用于加载/过期/错误/暂停/空闲提示。气泡回归现为 28 项。
+- 【气泡优化 2026-08-28】新增 `kit.BUBBLE_TOKENS`，气泡宽度/行高/标题列/手柄/
+  卡片圆角/动作按钮统一读设计令牌；`kit.action_qss` 统一气泡动作按钮。
+  模块行新增健康状态：正常 / 加载中 / 数据过期 / 出错 / 已暂停 / 空闲，
+  标题前显示状态点，悬停显示错误和下次刷新；模块右键新增“诊断信息”，
+  可查看上次更新、刷新间隔、下次刷新和最近错误。规则错误不再只有一次性弹窗。
+  v0.7 新增聚合 AI/设置窗口图标；气泡与桌宠缩放继续支持热更新。
+  气泡回归已扩到 25 项，`test_components_scale.py` 覆盖 9 个内置组件。
+
+- 【迁移 2026-08-14】项目整体搬迁到 `D:\Practice\AItest\Deepseek_projects\oi桌宠`
+  （工作区与运行目录合一，含 git 历史/全部备份）；旧目录只读保留
+- LLM 预设精简（去掉 Groq/OpenRouter），加入小米 MiMo
+  （`https://api.xiaomimimo.com/v1`，模型 `mimo-v2-flash`）
+- 新增 Codex 状态模块 + `codex_bridge.py`（读会话日志，单行滚动显示）
+- 自定义 UI 组件系统：`widgets/kit.py` 工具包、`panel.py` 示例、
+  组件行高度自适应 `_widget_height`（FIX_H → heightForWidth → sizeHint）
+- 模块编辑器去掉"组件下拉"（改为 JSON 直接写 `source.ui`）
+- 修复打包后默认图标不切换：冻结环境相对路径解析问题
+  （`_resolve_image_candidates` 按 `__file__`/_MEIPASS 解析）
+- 径向菜单多格式添加 + 按钮右键"编辑…"（类型自适应）+ 桌面按钮改名/换图标
+- 修复"径向菜单置顶盖住桌宠导致右键串菜单"：右键先判桌宠圆形区域，弹桌宠本体菜单
+- 【2026-08 后续】气泡/桌宠**两档独立缩放**：设置"桌宠外观"里"气泡大小/桌宠大小"
+  两个滑块（四档 1/1.25/1.5/2），存 `bubble_scale`/`pet_scale`；气泡内 `kit.bs()`、
+  桌宠 `kit.ps()`；`QT_SCALE_FACTOR` 固定 1.5；模块标题/按钮/文字统一按档位缩放
+- 【缩放稳定性 2026-08-28】`FIX_H` 统一定义为标准档逻辑高度，框架按 `current_height`
+  或 `kit.bs(FIX_H)` 换算；`kit.row/col`、基础组件 QSS、字体和气泡卡片度量统一缩放。
+  设置里的气泡/桌宠档位变更后由 `GravityPet._apply_pet_settings` 热更新：气泡档位
+  变化时安全重建 `StatusBubbleLayout`，桌宠档位变化时重算本体并重建菜单几何，
+  **不再要求手动重启**。
+- 内置模块规则：内置与自定义不能同名（编辑窗校验 + 加载期去重）；编辑内置模块保留
+  内置标记不迁移；内置可删除（hidden_builtins）；QQQ 默认每 30 秒弹出；打包默认开启
+  天气/内存/电池/聚合AI/无限画布/拼豆
+- AI 绘画工具（canvas_draw/perler_draw）改为**同步生成图元/像素再下发主线程执行**，
+  回报真实结果；`_llm_source_cfg` 跳过占位 API Key 优先取启用规则的真实 Key
+- 打包 v0.6：改用 **Python 3.12 venv + PyInstaller 6.21 + PyQtWebEngine**；
+  当时大小调整改为仅提示手动重启，右键不再有"重启桌宠"；
+  退出前清理 QtWebEngineProcess 子进程（避免 onefile 退出报 Failed to remove temp）
+- 修复径向菜单打不开（补模块级 `_kit` 导入）；修复展开菜单时气泡瞬跳/一帧切过去
+  （气泡避让用稳定半径 `_sector_outer_full`，`_smooth_move_to` 目标变化时从当前位置重起动画）
+
+## 8. 已知限制 / 坑位
+
+- **桌面端 Codex 审批无法外部注入**：桌面 app-server 走进程内 RPC，无公开本地接口；
+  官方远程审批入口是 ChatGPT 手机 App；CLI 版可用 `codex app-server`
+  （JSON-RPC，`thread/start` + `execCommandApproval` 回 `decision`），
+  但完整 CLI 客户端尚未实现，桥接 `/requests` `/approve` 已预留
+- 打包（单文件）后资源在 `_MEIPASS` 临时目录：默认图标/资源必须按 `__file__`
+  解析，不能按 CWD（exe 所在目录）解析；`_resolve_image_candidates` 已处理
+- 聚合AI 不再内置任何浏览器内核（QtWebEngine 已从打包排除）：靠系统的
+  Edge / Chrome，**两个都没装就用不了**（会弹提示）。`h5_cards` 的 webengine
+  是惰性导入，源码模式装了 PyQtWebEngine 才有。侧边栏的嵌入/层级依赖 Win32，
+  只在 Windows 上工作
+- **网页窗口绝对不能 SetParent 成宿主的子窗口**：跨进程 SetParent 之后
+  活动窗口属于桌宠线程、键盘焦点属于浏览器线程，而 Windows 的输入法 UI 按
+  活动窗口所在线程走——输入法够不到网页，中文候选浮窗退化成飘在屏幕角上的
+  浮动窗（实测 `GetGUIThreadInfo`）。现在是"顶层 + owner + 自己摆位 +
+  `SetWindowRgn` 自裁标题栏"。**新增任何会改变容器屏幕位置的路径，记得调
+  `host.refit()`**，否则网页会和容器错位。
+- 网页窗口是顶层窗口，**移出屏幕边缘时不会被裁**（子窗口才有父窗口帮它裁），
+  拖动宿主时也可能慢一帧跟上——这是换取中文输入正常的代价，别再为了"跟随
+  丝滑"改回子窗口。
+- **网页窗口嵌进宿主之后，绝对不能单独关掉其中一个**：实测不嵌入时关一个
+  没事，嵌入后关掉任一个，整个浏览器进程会退出、剩下的页面跟着全没。所以
+  切站点只"藏"（`hide_browser`）不关；关宿主时必须**先把所有页面
+  `detach_browser` 摘回顶层**再 `close_all`，否则宿主销毁会连带销毁子窗口，
+  浏览器下次启动会弹"恢复页面"
+- **浏览器 `--app` 窗口自己在客户区里画标题栏**，Win32 去不掉。靠
+  `browser_insets()` 量出内容区的内缩量，把窗口往左上挪、往外撑，让标题栏
+  被容器裁在外面。内缩量在窗口刚创建时量到的是旧值，所以 `_refit_soon()`
+  在 80/260/700ms 各校准一次
+- **跨进程 SetParent 会把两边的输入队列挂到一起**：浏览器 UI 线程若卡死，
+  理论上可能拖住桌宠的界面线程。实测没遇到，但别在这条路径上做耗时同步操作
+- 聚合AI 的所有站点共用一个浏览器配置目录：每个站点一个页面，开过就一直
+  留着（藏起来），切回去瞬间完成
+- 单实例锁：测试 exe 前必须先停 `pythonw main.py`，否则 exe 静默退出
+- widgets 组件按会话缓存：改组件文件必须重启桌宠，无热重载
+- WebP 动图依赖 Pillow（`PIL._webp`）与 Qt `qwebp.dll`，打包时都已包含
+- 气泡布局已统一为 StatusBubbleLayout（`bubble_layout.py`），无开关；基类
+  StatusBubble 把"模型"与"旧手绘呈现状态"（`_rows/_row_y/_link_hits`）耦合的
+  历史遗留已标记退役（不可达）。**新功能只按 StatusBubbleLayout 实现**，
+  不要再维护旧手绘路径
+- 设置窗口、桌宠均有单实例限制；气泡动画历史上有过重影/跳动问题，
+  改动布局动画需谨慎并用回归测试验证
+- 日志：`%TEMP%\oi_pet_error.log`、`%TEMP%\oi_pet_diag.log`
+- 配置：`pet_settings.json`（含 API Key，**不要提交进 git**）
+- **打包环境坑（重要）**：打包必须用 Python 3.12 venv（默认 `%LOCALAPPDATA%\oi-packenv`，
+  PyInstaller 6.21.0 + PyQtWebEngine）；不要用系统 Python 3.14
+  打包（onefile 重启/`_MEI`/`python314.dll` 一堆兼容问题）。大小调整现已热更新。
+- **改 spec 排除表后必须核对图片能画出来**：`excludes` 只拦 Python 模块，Qt 的
+  DLL/资源要靠 `_strip()` 按文件名剔；剔多了（比如误删 `qwebp.dll`）桌宠会退化成
+  蓝色占位圆，而打包过程不会报任何错。
+- **写文件不要用 `tempfile.mkstemp`**：目录不可写时它在 Windows 上会 100% 占核
+  死循环（见 v0.9.3 记录）。统一用 `data_store.make_temp_file()`。
+- **动态加载的组件（widgets/*.py）的依赖必须进 hiddenimports**：spec 里的
+  `_dynamic_deps()` 会自动扫描；但如果组件改成运行期 `__import__` 之类的动态形式，
+  扫描不到，仍要手工补。改完务必打包跑一次，确认气泡里没有红点。
+- **不要再设 `QT_SCALE_FACTOR`**：会导致文字位图放大发糊，且多屏时 Qt 逻辑坐标
+  跨屏不连续（径向菜单跳屏的根因）。要整体放大请改 `kit.UI_BASE`（或 `OI_UI_SCALE`）。
+- **新增控件的缩放归属**：kit 驱动的自绘/气泡控件记得标 `oi_nozoom` 并用
+  `bs/ps/bubble_k`；普通窗口里写原始像素即可（由 `install_ui_zoom` 统一放大），
+  **不要**在普通窗口里再乘 `UI_BASE`，否则会放大两次。
+
+## 9. 迁移到其他智能体（交接步骤）
+
+新智能体没有本对话的记忆，但能看到全部文件。把"记忆"转成下面三样：
+
+1. **本文档**（架构 + 工作流 + 历史 + 坑位）—— 第一必读
+2. **git 提交**：当前状态已提交，历史就是改动记录；继续迭代时按
+   `git add -A && git commit -m "..."` 逐步提交
+3. **备份 zip**：`oi桌宠_backup_<时间戳>.zip` 是每个版本快照，可回滚对照
+
+给新智能体的开场提示（直接粘贴）：
+
+```text
+请先完整阅读项目根目录下的 HANDOFF.md 和 自定义模块开发指南.md，了解项目架构、
+工作流与已知限制后再继续。工作区与运行目录合一，就是项目根目录（改动即生效）。
+- 运行/调试用 Python 3.14 x64（路径随机器而定）；依赖：
+  pip install PyQt5 PyQtWebEngine pyyaml Pillow psutil numpy
+- 打包用 Python 3.12 venv + PyInstaller 6.21（见 build.bat，默认 %LOCALAPPDATA%\oi-packenv）
+- 设置中的大小档位已热更新；改 Python 代码后仍需重启开发进程。
+每次改动必须：编译检查 → 跑 test_bubble.py（39 项）→ 重启桌宠（本目录 启动桌宠.bat）→
+备份 → 必要时用 build.bat 重打包（版本号只改 module_core.APP_VERSION 一行）。
+不要提交 pet_settings.json 等敏感文件。
+```
+
+迁移到别的机器时，拷贝：整个工作区（含 `widgets/`、`assets/`、测试、spec、
+`启动桌宠.bat`、`build_v090.bat`）。也可直接用发布时生成的 `oi桌宠_v0.9.0_源码.zip`
+（已排除用户数据与构建产物）。用户数据（pet_settings.json / *_data.json /
+chat_*.json）可不带，新机器会自动生成默认值。新机器需装：Python 3.14（运行）+
+PyQt5/PyQtWebEngine/PyYAML/Pillow/psutil/numpy，以及 Python 3.12 + 上述依赖 +
+PyInstaller 6.21（打包）。
+
+## 10. 常用命令速查
+
+```powershell
+python -u test_bubble.py                          # 气泡/模块契约/模块行几何回归测试（64 项）
+python -u test_components_scale.py                 # 组件缩放回归测试
+python -u test_templates.py                        # 模块模板验证（111 项，新增模板必跑）
+python -u test_webchat.py                          # 聚合AI：站点/摆位/粘住网页窗口/切换不闪/输入法/打开入口（54 项）
+python -u test_pet_anim.py                         # 倾角动画 + 空菜单盘开合 + 提示排版 + 悬停提示（44 项）
+python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性（14 项，沙箱隔离）
+python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（23 项，临时 profile，跑完即删）
+python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位
+python _make_backup.py                            # 备份
+python _make_source.py                            # 导出开发源码包（不含用户数据）
+build.bat                                         # 打包：便携单文件 + 安装包（版本取自 APP_VERSION）
+.\启动桌宠.bat                                     # 启动桌宠（在项目根目录执行）
+git add -A; git commit -m "..."                   # 提交（如已 git init；已自动忽略用户数据）
+```
