@@ -502,25 +502,27 @@ class Widget(ModuleWidget):
         # 收纳工具栏：收起为右上角小三角按钮，再点还原（展开朝右/收纳朝左，风格一致）
         self._btn_bar_fold = self._b("", "收纳工具栏", False, ic("fold"))
         self._btn_bar_fold.clicked.connect(self._toggle_bar)
-        # 当前颜色预览：占掉按钮行剩下的横向空间（和拼豆工具栏一个样式）。
-        # 按钮不再被拉成长条，多出来的宽度交给它，一眼能看出在用什么颜色。
-        self._cur_color = QLabel("", self._bar_row1)
-        self._cur_color.setCursor(Qt.PointingHandCursor)
-        self._cur_color.setToolTip("当前颜色")
-        self._bar_row1_lay.addWidget(self._cur_color, 1)
         # 颜色（小色块）
         self._color_btns = []
         for c in _PALETTE:
             cb = QPushButton("", self._bar_row2)
             cb.setToolTip("画笔颜色")
-            cb.setFixedSize(kit.bs(9), kit.bs(9))
+            # 尺寸/圆角与拼豆完全一致（bs(14) + radius 7），两个组件看着才是一套
+            cb.setFixedSize(kit.bs(14), kit.bs(14))
             cb.setCursor(Qt.PointingHandCursor)
             cb.setStyleSheet(kit.scale_qss(
                 "QPushButton{border:1px solid rgba(255,255,255,70);"
-                "border-radius:4px;background:%s;}" % c))
+                "border-radius:7px;background:%s;}" % c))
             cb.clicked.connect(lambda _=False, cc=c: self._set_color(cc))
             self._color_btns.append(cb)
             self._bar_row2_lay.addWidget(cb)
+        # 当前颜色预览：挂在**色块行**末尾，吃掉这一行剩下的宽度（和拼豆
+        # 工具栏同款）。放按钮行的话，9 个按钮再加一个可伸缩的框就会被挤到
+        # 第二行去，算上色块行一共三行。
+        self._cur_color = QLabel("", self._bar_row2)
+        self._cur_color.setCursor(Qt.PointingHandCursor)
+        self._cur_color.setToolTip("当前颜色")
+        self._bar_row2_lay.addWidget(self._cur_color, 1)
         # 粗细滑条：**竖着悬浮在画布侧边**，不占工具栏那一行的宽度。
         # 横着放的时候它要 78px，逼得色块和按钮一起缩水（用户反馈按钮太小）。
         self._width_slider = QSlider(Qt.Vertical, self._expand)
@@ -555,7 +557,7 @@ class Widget(ModuleWidget):
             pass
         for cb, cc in zip(self._color_btns, _PALETTE):
             cb.setStyleSheet(kit.scale_qss(
-                "QPushButton{border:2px solid %s;border-radius:5px;background:%s;}"
+                "QPushButton{border:2px solid %s;border-radius:7px;background:%s;}"
                 % ("#ffffff" if cc == c else "rgba(255,255,255,70)", cc)))
         # 有选中元素时：改其颜色（笔画改色 / 文字改色；照片无颜色属性）
         try:
@@ -617,41 +619,31 @@ class Widget(ModuleWidget):
                 pass
 
     def _fit_bar_btns(self, avail_w):
-        """按宽度定按钮尺寸/行数，并返回工具栏该有多宽。
+        """按钮一律用**和拼豆完全相同**的尺寸，只决定一行放几个、工具栏多宽。
 
-        历程：最早是死的 `bubble_token("icon_button_*")`，气泡拉宽了按钮还是那么
-        小；改成按比例缩放后，窄气泡下 9 个按钮挤成一堆小方块，比拼豆的还小
-        （用户反馈"为什么更小了"）；再改成拉伸填满，宽画布上又被拉成长棍。
-        现在照拼豆的最终形态：**按钮到舒服的尺寸就不再长**（封在基准的 1.6 倍），
-        按钮行末尾挂一个"当前颜色"预览框吃掉剩下的宽度。
+        历程（三次返工，别再改成"按宽度缩放"了）：
+        1) 最早写死 `bubble_token("icon_button_*")` —— 对的，但那会儿工具栏被限宽，
+           9 个按钮挤不下、右边几个被裁在画布外，看着像"按钮太小"；
+        2) 改成按可用宽度按比例放大 —— 窄气泡下反而更小；
+        3) 改成拉伸填满 + 上限 1.6 倍 —— 又比拼豆大出一圈，还被预览框挤成三行。
+        用户要的一直是"和拼豆一样大"。所以尺寸就取基准 token（= 拼豆那颗），
+        不放大也不缩小；宽度富余留给色块行末尾的颜色预览框。
         """
         btns = getattr(self, "_bar_btns", None)
         if not btns:
             return 0
         n = len(btns)
-        base_w = kit.bubble_token("icon_button_width")
-        base_h = kit.bubble_token("icon_button_height")
+        w = kit.bubble_token("icon_button_width")     # 与拼豆同一个 token
+        h = kit.bubble_token("icon_button_height")
         m = self._bar_v.contentsMargins()
         sp = self._bar_row1_lay.spacing()
         edge = kit.bs(6)                       # 工具栏距画布右边缘
-        outer = max(base_w * 2,
-                    int(avail_w) - self._side_slider_w() - edge - 2)
-        inner = max(base_w, outer - m.left() - m.right())
-        prev_min = base_w * 2                  # 留给"当前颜色"预览框的最小宽度
-        room = max(base_w, inner - prev_min - sp)
-        # 行数取"能让每个按钮都不瘦过基准尺寸"的最小值，再把按钮**均分**到各行
-        # （9 个分 2 行是 5+4，不是 6+3；一行塞满另一行零星几个很难看）
-        rows_n = 1
-        while rows_n < n:
-            per = -(-n // rows_n)              # ceil
-            if (room - sp * (per - 1)) / float(per) >= base_w:
-                break
-            rows_n += 1
+        outer = max(w * 2, int(avail_w) - self._side_slider_w() - edge - 2)
+        inner = max(w, outer - m.left() - m.right())
+        # 一行能放几个（按钮不缩小，放不下才换行），再把按钮均分到各行
+        fit = max(1, int((inner + sp) // (w + sp)))
+        rows_n = max(1, -(-n // fit))
         per_row = max(1, -(-n // rows_n))
-        w = int(max(base_w, (room - sp * (per_row - 1)) / float(per_row)))
-        w = min(w, int(base_w * 1.6))
-        h = int(max(base_h, min(w * base_h / float(max(1, base_w)),
-                                base_h * 1.6)))
         icon = max(kit.bubble_token("icon"), int(min(w, h) * 0.78))
         for b in btns:
             try:
@@ -664,25 +656,26 @@ class Widget(ModuleWidget):
             self._bar_per_row = per_row
             self._reflow_bar_rows(per_row, h)
         try:
-            self._cur_color.setFixedHeight(max(kit.bs(10), h - kit.bs(4)))
-            self._cur_color.setMinimumWidth(prev_min)
+            self._cur_color.setFixedHeight(max(kit.bs(10), h - kit.bs(2)))
+            self._cur_color.setMinimumWidth(w * 2)
         except Exception:
             pass
         self._fit_bar_row2(inner, sp, h)
         return outer
 
     def _fit_bar_row2(self, budget, sp, row_h):
-        """颜色行：色块同样拉伸填满，不再和粗细滑条抢宽度。
+        """颜色行：11 个色块 + 末尾的「当前颜色」预览框。
 
-        粗细滑条已经挪到画布侧边竖着悬浮（`_side_slider`），这一行只剩色块，
-        于是能和按钮行一样铺开。
+        预览框放**这一行**而不是按钮行：按钮行有 9 个按钮，再塞一个可伸缩的
+        预览框就会把按钮挤到第二行去（加上色块行一共三行，用户反馈"又变成了
+        三行"）。色块只有 9px 见方，这一行本来就有富余，正好给预览框。
+        粗细滑条已经挪到画布侧边竖着悬浮，不占这一行的宽度。
         """
         cbs = getattr(self, "_color_btns", None)
         if not cbs:
             return
         nc = len(cbs)
-        sw = int(max(kit.bs(9), (budget - sp * (nc - 1)) / float(nc)))
-        sw = min(sw, row_h)          # 色块别比按钮还高，一行看着才齐
+        sw = kit.bs(14)                # 和拼豆同一个尺寸，不随宽度长大
         for cb in cbs:
             try:
                 if cb.width() != sw or cb.height() != sw:
@@ -714,18 +707,7 @@ class Widget(ModuleWidget):
                 b.setParent(host)
             host.layout().addWidget(b)
             b.show()
-        # "当前颜色"预览框永远挂在**最后一行**的末尾，吃掉剩余宽度
-        try:
-            last = rows[max(0, need - 1)]
-            old = self._cur_color.parent()
-            if old is not None and old.layout() is not None:
-                old.layout().removeWidget(self._cur_color)
-            if old is not last:
-                self._cur_color.setParent(last)
-            last.layout().addWidget(self._cur_color, 1)
-            self._cur_color.show()
-        except Exception:
-            pass
+        # 注意：「当前颜色」预览框不参与这里的重排，它常驻在色块行末尾。
         for i, host in enumerate(rows):
             host.setVisible(i < need)
             if i < need:

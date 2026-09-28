@@ -225,10 +225,9 @@ for _n in _AI_WIDGETS:
     check("AI 按钮(%s)：有说明提示" % _n,
           _ai is not None and "AI" in _ai.toolTip())
 
-# ---------- 画布工具栏：按钮拉伸填满（拼豆那种尺寸），滑条竖在侧边 ----------
-# 用户反馈两轮：先是"按钮太小"，改成按比例缩放后又变成"比拼豆还小"。
-# 拼豆的做法是按钮拉伸填满整行，这里照搬；粗细滑条挪到侧边竖着悬浮，
-# 不再和色块抢横向空间。
+# ---------- 画布工具栏：尺寸必须和拼豆一模一样 ----------
+# 反复返工三次的地方，把结论钉死：用户要的是"和拼豆一样"，不是"不小于拼豆"，
+# 也不是"按宽度缩放"。按钮/色块都取和拼豆同一个 token，任何宽度下都不变。
 _pl, _ = load_module_widget("perler")
 _cv, _ = load_module_widget("canvas")
 if _cv is None or _pl is None:
@@ -237,8 +236,6 @@ else:
     _pl.resize(300, 200)
     _pl.show()
     _pl._toggle_fold()
-    app.processEvents()
-    _ref_w = _pl._btn_pen.width()        # 拼豆按钮 = 用户认可的参照尺寸
     _cv.resize(300, 260)
     _cv.show()
     _cv._toggle_fold()
@@ -246,33 +243,40 @@ else:
     check("画布工具栏：粗细滑条是竖的，悬浮在画布侧边（不占工具栏宽度）",
           _cv._width_slider.orientation() == _QtCore.Qt.Vertical
           and _cv._width_slider.parent() is _cv._expand)
-    check("画布工具栏：颜色行里没有滑条了（腾出来给色块铺开）",
-          _cv._width_slider not in [
-              _cv._bar_row2_lay.itemAt(i).widget()
-              for i in range(_cv._bar_row2_lay.count())])
     _obs = []
-    for _cw in (260, 300, 360, 480, 640):
+    for _cw in (290, 300, 360, 480, 640):
         _cv.resize(_cw, 260)
         _cv._expand.resize(_cw, 240)
         _cv._place_bar()
         app.processEvents()
         _sl = _cv._width_slider
-        _obs.append((_cw, _cv._bar_btns[0].width(), _cv._bar.x(),
-                     _cv._bar.width(), _cv._bar_per_row,
-                     _sl.x() + _sl.width()))
-    _small = [(w, bw) for w, bw, _x, _bw, _p, _s in _obs if bw < _ref_w]
-    check("画布工具栏：任何宽度下按钮都不小于拼豆那颗（参照 %d px，实测 %s）"
-          % (_ref_w, [o[1] for o in _obs]), not _small, "偏小的：%s" % (_small[:2],))
-    check("画布工具栏：按钮随画布变宽而变大（%d -> %d）"
-          % (_obs[0][1], _obs[-1][1]), _obs[-1][1] > _obs[0][1])
-    _out = [(w, x + bw) for w, _b, x, bw, _p, _s in _obs if x + bw > w - 2]
-    check("画布工具栏：任何宽度下都在画布内（按钮不会被裁到点不着）",
-          not _out, "探出去的：%s" % (_out[:2],))
-    _overlap = [(w, x, s) for w, _b, x, _bw, _p, s in _obs if x < s]
-    check("画布工具栏：不压住侧边那根竖滑条", not _overlap,
-          "压住的：%s" % (_overlap[:2],))
-    check("画布工具栏：窄的时候换行而不是把按钮缩小（每行 %s）"
-          % ([o[4] for o in _obs],), _obs[0][4] <= _obs[-1][4])
+        _obs.append((_cw, _cv._bar_btns[0].size(), _cv._color_btns[0].width(),
+                     sum(1 for r in _cv._bar_rows if r.isVisible()),
+                     _cv._cur_color.width(),
+                     _cv._bar.x(), _cv._bar.width(), _sl.x() + _sl.width()))
+    _bad = [(o[0], o[1].width()) for o in _obs
+            if o[1] != _pl._btn_pen.size()]
+    check("画布工具栏：按钮和拼豆完全同尺寸（%dx%d），任何宽度下都不变"
+          % (_pl._btn_pen.width(), _pl._btn_pen.height()),
+          not _bad, "不一样的：%s" % (_bad[:3],))
+    _badc = [(o[0], o[2]) for o in _obs if o[2] != _pl._color_btns[0].width()]
+    check("画布工具栏：色块也和拼豆同尺寸（%d px）"
+          % _pl._color_btns[0].width(), not _badc, "不一样的：%s" % (_badc[:3],))
+    check("画布工具栏：常用宽度下就是「一行按钮 + 一行色块」，不是三行（%s）"
+          % ([o[3] + 1 for o in _obs],),
+          all(o[3] == 1 for o in _obs))
+    check("画布工具栏：颜色预览框在色块行、吃掉那一行的富余（%d -> %d px）"
+          % (_obs[0][4], _obs[-1][4]),
+          _cv._cur_color.parent() is _cv._bar_row2 and _obs[-1][4] > _obs[0][4])
+    check("画布：预览框一开始就上了色",
+          "background" in _cv._cur_color.styleSheet())
+    check("调色板：画布和拼豆用同一份（都来自 kit.PALETTE，%d 色）"
+          % len(kit.PALETTE),
+          len(_cv._color_btns) == len(_pl._color_btns) == len(kit.PALETTE))
+    _out = [(o[0], o[5] + o[6]) for o in _obs if o[5] + o[6] > o[0] - 2]
+    check("画布工具栏：任何宽度下都在画布内", not _out, "探出去：%s" % (_out[:2],))
+    _ov = [(o[0], o[5], o[7]) for o in _obs if o[5] < o[7]]
+    check("画布工具栏：不压住侧边那根竖滑条", not _ov, "压住：%s" % (_ov[:2],))
     check("画布工具栏：AI 按钮不在工具栏里重复出现（已挪到标题行）",
           not hasattr(_cv, "_btn_ai"))
     _cv.close()
@@ -314,43 +318,6 @@ check("弹窗：摆位在 showEvent 里做（构造时还没按 UI_BASE 放大�
       "def showEvent" in open(
           os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "widgets", "kit.py"), encoding="utf-8").read())
-
-# ---------- 画布 / 拼豆：同一套调色板 + 当前颜色预览框 ----------
-_cv2, _ = load_module_widget("canvas")
-_pl2, _ = load_module_widget("perler")
-if _cv2 is None or _pl2 is None:
-    check("调色板：组件能加载", False)
-else:
-    _pl2.resize(300, 200)
-    _pl2.show()
-    _pl2._toggle_fold()
-    _cv2.resize(360, 260)
-    _cv2.show()
-    _cv2._toggle_fold()
-    app.processEvents()
-    check("调色板：画布和拼豆用同一份（都来自 kit.PALETTE，%d 色）"
-          % len(kit.PALETTE),
-          len(_cv2._color_btns) == len(_pl2._color_btns) == len(kit.PALETTE))
-    check("画布：工具栏有「当前颜色」预览框，且一开始就上了色",
-          hasattr(_cv2, "_cur_color")
-          and "background" in _cv2._cur_color.styleSheet())
-    _cv2._expand.resize(360, 240)
-    _cv2._place_bar()
-    app.processEvents()
-    _w_narrow = _cv2._cur_color.width()
-    _cv2.resize(640, 260)
-    _cv2._expand.resize(640, 240)
-    _cv2._place_bar()
-    app.processEvents()
-    check("画布：预览框吃掉按钮行多出来的宽度（%d -> %d px）"
-          % (_w_narrow, _cv2._cur_color.width()),
-          _cv2._cur_color.width() > _w_narrow)
-    check("画布：按钮不会被拉成长棍（封在基准的 1.6 倍内，实测 %d px）"
-          % _cv2._bar_btns[0].width(),
-          _cv2._bar_btns[0].width()
-          <= int(kit.bubble_token("icon_button_width") * 1.6) + 1)
-    _cv2.close()
-    _pl2.close()
 
 # ---------- 行高预算：与字体无关的公式不变式 ----------
 # 卡片上下各调一次 bs(1)，bs() 每次取整；行高预算若用 bs(2) 会差 1px，
