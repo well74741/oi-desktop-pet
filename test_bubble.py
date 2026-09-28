@@ -789,6 +789,75 @@ for _wname in ("tokenmeter", "stats"):
           abs(len(_dirs["展开"][0]) - len(_dirs["收起"][0])) <= 3)
     _sb.close()
 
+# ---------- 拖气泡顶栏移动桌宠：不许拖出屏幕，松手要吸附 ----------
+# 回归：这条路以前是裸 pet.move()，没有边界钳制也没有吸附收尾，一路拖能把桌宠
+# 推到屏幕外面再也找不着（用户反馈"会被一直拖到屏幕之外去"）。直接拖桌宠本体
+# 走的是 _clamp_to_desktop + _check_edge_snap，两条路必须一致。
+from PyQt5.QtCore import QEvent as _QEv2, Qt as _Qt2          # noqa: E402
+from PyQt5.QtGui import QMouseEvent as _QME                    # noqa: E402
+
+_st = _PG.load_settings()
+_st["status_rules"] = [{"name": "CPU",
+                        "source": {"type": "static", "text": "50%"}}]
+_PG.save_settings(_st)
+_pet = _PG.GravityPet(_PG.load_settings())
+_pet.show()
+app.processEvents()
+_bub = _pet.status_bubble
+_bub.show()
+app.processEvents()
+_scr = QApplication.primaryScreen().availableGeometry()
+
+
+def _drag_pet_via_bubble(gx, gy):
+    _start = QPoint(_bub.x() + _bub.width() // 2, _bub.y() + 3)
+    _bub.mousePressEvent(_QME(_QEv2.MouseButtonPress,
+                              QPoint(_bub.width() // 2, 3), _start,
+                              _Qt2.LeftButton, _Qt2.LeftButton, _Qt2.NoModifier))
+    _bub.mouseMoveEvent(_QME(_QEv2.MouseMove, QPoint(0, 0), QPoint(gx, gy),
+                             _Qt2.NoButton, _Qt2.LeftButton, _Qt2.NoModifier))
+    app.processEvents()
+    _bub.mouseReleaseEvent(_QME(_QEv2.MouseButtonRelease, QPoint(0, 0),
+                                QPoint(gx, gy), _Qt2.LeftButton, _Qt2.NoButton,
+                                _Qt2.NoModifier))
+    app.processEvents()
+
+
+def _visible_px():
+    _g = _PG._virtual_geo()
+    _r = _pet.frameGeometry()
+    return (max(0, min(_r.right() + 1, _g.right() + 1) - max(_r.left(), _g.left())),
+            max(0, min(_r.bottom() + 1, _g.bottom() + 1) - max(_r.top(), _g.top())))
+
+
+_drag_cases = []
+for _nm, _gx, _gy in (("左", -4000, 400), ("右", _scr.width() + 4000, 400),
+                      ("上", 600, -4000), ("下", 600, _scr.height() + 4000)):
+    _drag_pet_via_bubble(_gx, _gy)
+    _vw, _vh = _visible_px()
+    _drag_cases.append((_nm, _vw, _vh, _pet.snapped_edge))
+    _pet.recenter()
+    app.processEvents()
+
+check("拖气泡移桌宠：往四个方向都拖不出屏幕（最少露出 %s px）"
+      % ([min(c[1], c[2]) for c in _drag_cases],),
+      all(c[1] > 0 and c[2] > 0 for c in _drag_cases))
+check("拖气泡移桌宠：拖到边缘松手会变成吸附态（%s）"
+      % ([c[3] for c in _drag_cases],),
+      all(c[3] for c in _drag_cases))
+check("拖气泡移桌宠：和直接拖桌宠用的是同一套钳制/吸附（不是各写一份）",
+      "_clamp_to_desktop" in open(
+          os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "bubble_layout.py"), encoding="utf-8").read()
+      and "_check_edge_snap" in open(
+          os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "bubble_layout.py"), encoding="utf-8").read())
+try:
+    _pet.close()
+except Exception:
+    pass
+app.processEvents()
+
 data_store.DATA_DIR = _ds_dir_bak
 import shutil as _sh                                          # noqa: E402
 _sh.rmtree(_fold_sand, ignore_errors=True)

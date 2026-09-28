@@ -19,6 +19,7 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from PyQt5 import QtCore as _QtCore                       # noqa: E402
 from PyQt5.QtCore import QPoint                          # noqa: E402
 from PyQt5.QtGui import QFontMetrics                      # noqa: E402
 from PyQt5.QtWidgets import QApplication, QVBoxLayout, QWidget   # noqa: E402
@@ -224,36 +225,58 @@ for _n in _AI_WIDGETS:
     check("AI 按钮(%s)：有说明提示" % _n,
           _ai is not None and "AI" in _ai.toolTip())
 
-# ---------- 画布工具按钮：跟着宽度自适应，且不探出画布 ----------
+# ---------- 画布工具栏：按钮拉伸填满（拼豆那种尺寸），滑条竖在侧边 ----------
+# 用户反馈两轮：先是"按钮太小"，改成按比例缩放后又变成"比拼豆还小"。
+# 拼豆的做法是按钮拉伸填满整行，这里照搬；粗细滑条挪到侧边竖着悬浮，
+# 不再和色块抢横向空间。
+_pl, _ = load_module_widget("perler")
 _cv, _ = load_module_widget("canvas")
-if _cv is None:
+if _cv is None or _pl is None:
     check("画布工具栏：组件能加载", False)
 else:
-    _cv.resize(400, 260)
+    _pl.resize(300, 200)
+    _pl.show()
+    _pl._toggle_fold()
+    app.processEvents()
+    _ref_w = _pl._btn_pen.width()        # 拼豆按钮 = 用户认可的参照尺寸
+    _cv.resize(300, 260)
     _cv.show()
+    _cv._toggle_fold()
     app.processEvents()
-    _cv._toggle_fold()                 # 展开才有工具栏
-    app.processEvents()
+    check("画布工具栏：粗细滑条是竖的，悬浮在画布侧边（不占工具栏宽度）",
+          _cv._width_slider.orientation() == _QtCore.Qt.Vertical
+          and _cv._width_slider.parent() is _cv._expand)
+    check("画布工具栏：颜色行里没有滑条了（腾出来给色块铺开）",
+          _cv._width_slider not in [
+              _cv._bar_row2_lay.itemAt(i).widget()
+              for i in range(_cv._bar_row2_lay.count())])
     _obs = []
-    for _cw in (200, 320, 480, 640):
+    for _cw in (260, 300, 360, 480, 640):
         _cv.resize(_cw, 260)
         _cv._expand.resize(_cw, 240)
         _cv._place_bar()
         app.processEvents()
-        _obs.append((_cw, _cv._bar_btns[0].width(), _cv._bar.width(),
-                     _cv._bar_per_row))
-    _too_wide = [(w, bw) for w, _b, bw, _p in _obs if bw > w - 4]
-    check("画布工具栏：任何宽度下都在画布内（按钮不会被裁到点不着）",
-          not _too_wide, "探出去的：%s" % (_too_wide[:2],))
-    check("画布工具栏：按钮随宽度变大（%d px -> %d px）"
+        _sl = _cv._width_slider
+        _obs.append((_cw, _cv._bar_btns[0].width(), _cv._bar.x(),
+                     _cv._bar.width(), _cv._bar_per_row,
+                     _sl.x() + _sl.width()))
+    _small = [(w, bw) for w, bw, _x, _bw, _p, _s in _obs if bw < _ref_w]
+    check("画布工具栏：任何宽度下按钮都不小于拼豆那颗（参照 %d px，实测 %s）"
+          % (_ref_w, [o[1] for o in _obs]), not _small, "偏小的：%s" % (_small[:2],))
+    check("画布工具栏：按钮随画布变宽而变大（%d -> %d）"
           % (_obs[0][1], _obs[-1][1]), _obs[-1][1] > _obs[0][1])
-    check("画布工具栏：窄的时候换行而不是把按钮缩小到点不准（每行 %s）"
-          % ([p for _w, _b, _bw, p in _obs],),
-          _obs[0][3] < _obs[-1][3]
-          and _obs[0][1] >= kit.bubble_token("icon_button_width"))
+    _out = [(w, x + bw) for w, _b, x, bw, _p, _s in _obs if x + bw > w - 2]
+    check("画布工具栏：任何宽度下都在画布内（按钮不会被裁到点不着）",
+          not _out, "探出去的：%s" % (_out[:2],))
+    _overlap = [(w, x, s) for w, _b, x, _bw, _p, s in _obs if x < s]
+    check("画布工具栏：不压住侧边那根竖滑条", not _overlap,
+          "压住的：%s" % (_overlap[:2],))
+    check("画布工具栏：窄的时候换行而不是把按钮缩小（每行 %s）"
+          % ([o[4] for o in _obs],), _obs[0][4] <= _obs[-1][4])
     check("画布工具栏：AI 按钮不在工具栏里重复出现（已挪到标题行）",
           not hasattr(_cv, "_btn_ai"))
     _cv.close()
+    _pl.close()
 
 kit.set_bubble_scale(1.0)
 

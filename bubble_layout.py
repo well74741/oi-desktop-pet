@@ -1365,8 +1365,16 @@ class StatusBubbleLayout(StatusBubble):
     def mouseMoveEvent(self, event):
         d = getattr(self, "_drag_pet", None)
         if d is not None:
-            self.pet.move(event.globalPos().x() - d["gx"],
-                          event.globalPos().y() - d["gy"])
+            # 必须走桌宠自己的边界钳制：以前这里是裸 move()，一路拖能把桌宠
+            # 推到屏幕外面再也找不着（用户反馈"会被一直拖到屏幕之外去"）。
+            # 直接拖桌宠本体走的就是 _clamp_to_desktop，两条路必须一致。
+            p = QPoint(event.globalPos().x() - d["gx"],
+                       event.globalPos().y() - d["gy"])
+            try:
+                p = self.pet._clamp_to_desktop(p)
+            except Exception:
+                pass
+            self.pet.move(p)
             # 菜单展开时：菜单窗口跟随桌宠移动并按新位置重排（与直接拖动桌宠一致）
             try:
                 menu = getattr(self.pet, "radial_menu", None)
@@ -1395,6 +1403,16 @@ class StatusBubbleLayout(StatusBubble):
             self._drag_pet = None
             try:
                 self.pet.is_dragging = False
+                # 松手要走和"直接拖桌宠"完全相同的收尾：清掉旧吸附状态，
+                # 试一次边缘吸附（成功的话桌宠自己会播倾倒动画）；没吸附就把
+                # 倾角补回 0。少了这一步，从气泡拖到屏幕边只会停在那儿，
+                # 既不吸附也保持着歪的姿态。
+                self.pet.snapped_edge = None
+                if not self.pet._check_edge_snap():
+                    import pet_gravity as _pg
+                    if abs(getattr(self.pet, "_rest_rotation", 0.0)) > 0.5 \
+                            and not getattr(self.pet, "_rot_active", False):
+                        self.pet._start_rot_anim(0.0, _pg.UNSNAP_ROT_DURATION)
             except Exception:
                 pass
             event.accept()

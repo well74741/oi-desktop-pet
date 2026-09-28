@@ -156,26 +156,29 @@ blk = blk[:blk.index("_pre_dlg_scales")]
 check("打开设置窗前先合并磁盘最新设置（兜住只写盘的改动路径）",
       "self.settings.update(load_settings())" in blk)
 
-# ---------- 6. 任务管理器里找得到、关得掉 ----------
-# 桌宠原来是 Qt.Tool 工具窗：不占任务栏，代价是任务管理器只把它排进「后台进程」，
-# 用户在「应用」里找不到、也就没法强行结束它。现在无条件当普通顶层窗口。
+# ---------- 6. 托盘是唯一常驻入口（桌宠不占任务栏） ----------
+# 桌宠是 Qt.Tool 工具窗：不占任务栏、不进 Alt+Tab。代价是任务管理器只在
+# 「后台进程」里列它，所以"设置 / 退出"必须能从系统托盘右键拿到。
 from PyQt5.QtCore import Qt as _Qt                        # noqa: E402
 
 # 注意：Qt.Tool 是复合标志（Popup|Dialog|Window），顶层窗口天然带 Qt.Window，
 # 用 flags & Qt.Tool 判断永远为真。必须比窗口类型掩码。
 _wtype = pet.windowFlags() & _Qt.WindowType_Mask
-check("任务管理器：不是工具窗（工具窗只会进「后台进程」，用户找不到）",
-      _wtype != _Qt.Tool)
-check("任务管理器：窗口有标题，任务管理器/进程工具里认得出来",
-      pet.windowTitle() == "oi桌宠")
-check("任务管理器：没有留下开关（用户明确要求不做成勾选项）",
-      "taskbar_visible" not in pet.settings
-      and not hasattr(G.SettingsDialog, "apply_taskbar_visible"))
-check("任务管理器：仍然不抢焦点（WA_ShowWithoutActivating 没被顺手删掉）",
-      pet.testAttribute(_Qt.WA_ShowWithoutActivating))
-check("任务管理器：无边框 + 置顶都还在",
-      bool(pet.windowFlags() & _Qt.FramelessWindowHint)
-      and bool(pet.windowFlags() & _Qt.WindowStaysOnTopHint))
+check("桌宠是工具窗：不在任务栏里占一格", _wtype == _Qt.Tool)
+check("桌宠有窗口标题（进程工具里认得出来）", pet.windowTitle() == "oi桌宠")
+check("没有留下「在任务栏显示」这种开关", "taskbar_visible" not in pet.settings)
+check("桌宠不抢焦点", pet.testAttribute(_Qt.WA_ShowWithoutActivating))
+
+_main_src = open(os.path.join(HERE, "main.py"), encoding="utf-8").read()
+_tray_blk = _main_src[_main_src.index("def _setup_tray"):
+                      _main_src.index("def _show_pet")]
+for _item in ("设置", "显示桌宠", "隐藏桌宠", "回到中央", "退出"):
+    check("托盘右键有「%s」" % _item, '"%s"' % _item in _tray_blk)
+check("托盘「设置」接到了真正的开设置窗入口",
+      "self._open_settings" in _tray_blk
+      and "self.pet._open_settings()" in _main_src)
+check("桌宠确实有 _open_settings（托盘调的就是它）",
+      callable(getattr(pet, "_open_settings", None)))
 
 try:
     pet.close()

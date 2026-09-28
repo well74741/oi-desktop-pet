@@ -6887,11 +6887,11 @@ class GravityPet(QWidget):
                 self.status_bubble.hide_animated()
 
     def _setup_window(self):
-        # 不用 Qt.Tool：工具窗（WS_EX_TOOLWINDOW）虽然不占任务栏，但任务管理器
-        # 只会把它排进「后台进程」，用户在「应用」里找不到、也就没法强行结束它。
-        # 代价是任务栏多一个按钮、Alt+Tab 里也会出现，这是能被"找到并关掉"的价钱。
-        # WA_ShowWithoutActivating 保证它照旧不抢焦点。
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        # Qt.Tool = WS_EX_TOOLWINDOW：不占任务栏、不进 Alt+Tab，桌宠该是这样。
+        # 代价是任务管理器只在「后台进程」里列它（名字取 exe 的 FileDescription
+        # 「oi桌宠桌面宠物」）。想正常关掉它请用托盘右键 →「退出」。
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+                            | Qt.Tool)
         self.setWindowTitle("oi桌宠")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)

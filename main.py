@@ -278,6 +278,13 @@ class DesktopPetApp:
         self.tray_icon.setToolTip("oi桌宠 v%s - 点击显示/隐藏" % APP_VERSION)
 
         menu = QMenu()
+        settings_action = QAction("设置", self.app)
+        settings_action.setToolTip("打开桌宠设置（和右键桌宠 →「设置」是同一个窗口）")
+        settings_action.triggered.connect(self._open_settings)
+        menu.addAction(settings_action)
+
+        menu.addSeparator()
+
         show_action = QAction("显示桌宠", self.app)
         show_action.triggered.connect(self._show_pet)
         menu.addAction(show_action)
@@ -304,6 +311,20 @@ class DesktopPetApp:
     def _show_pet(self):
         self.pet.show()
         self.pet.raise_()
+
+    def _open_settings(self):
+        """托盘右键「设置」：桌宠是工具窗，不在任务栏里，托盘就是它唯一的常驻入口。
+        桌宠被隐藏时也能改设置——先让它露面，再开同一个设置窗。"""
+        try:
+            if not self.pet.isVisible():
+                self._show_pet()
+            self.pet._open_settings()
+        except Exception as e:
+            try:
+                from pet_gravity import _error_log
+                _error_log("tray open settings failed: %r" % (e,))
+            except Exception:
+                pass
 
     def _hide_pet(self):
         self.pet.hide()
