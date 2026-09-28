@@ -510,6 +510,7 @@ class WebChatHost(QWidget):
     POLL_MS = 600      # 只用来同步标题、发现网页窗口没了；跟随不需要轮询
     REVEAL_MS = 20     # 显示新页面前的对齐重试间隔
     REVEAL_TRIES = 40  # 最多等这么多拍（约 0.8s），到点了也显示，不能一直不出来
+    FIT_RETRY_TRIES = 300   # 显示之后继续纠正对齐的拍数（约 6s，够慢站点起来）
 
     def __init__(self):
         super().__init__(None)
@@ -563,15 +564,50 @@ class WebChatHost(QWidget):
             self.show()        # 改标志会重建原生窗口，得重新显示
 
     def refit(self):
-        """让网页内容正好压住容器（网页窗口是顶层窗口，得我们自己摆）。"""
-        if self._hwnd:
-            self._L.fit_browser(self._hwnd, self.holder_hwnd())
+        """让网页内容正好压住容器（网页窗口是顶层窗口，得我们自己摆）。
+
+        `fit_browser` 是非阻塞的：内缩量还没量到（页面刚起、多进程站点的渲染
+        子窗口晚一步出现）时它直接返回 None，绝不在主线程里等——moveEvent 每帧
+        都走这里，等 0.25s 就是拖动时整个桌宠卡死。量不到就挂一个���定时器重试，
+        直到量到为止。
+        """
+        if not self._hwnd:
+            return
+        if self._L.fit_browser(self._hwnd, self.holder_hwnd()) is None:
+            self._retry_fit()
+        elif getattr(self, "_fit_retry", None) is not None                 and self._fit_retry.isActive():
+            self._fit_retry.stop()      # 已经摆好了，重试没必要再跑
+
+    def _retry_fit(self):
+        """内缩量还没就绪：隔几十毫秒再试，最多试一小会儿（不阻塞主线程）。"""
+        if getattr(self, "_fit_retry", None) is None:
+            self._fit_retry = QTimer(self)
+            self._fit_retry.setInterval(self.REVEAL_MS)
+            self._fit_retry.timeout.connect(self._on_fit_retry)
+        # 给足时间：REVEAL_TRIES(40) × REVEAL_MS(20) 只有 0.8 秒，千问/文心
+        # 这类站点起得慢，0.8 秒后往往还没就位。这里放到约 6 秒。
+        self._fit_left = self.FIT_RETRY_TRIES
+        if not self._fit_retry.isActive():
+            self._fit_retry.start()
+
+    def _on_fit_retry(self):
+        self._fit_left = getattr(self, "_fit_left", 0) - 1
+        if not self._hwnd or self._fit_left <= 0:
+            self._fit_retry.stop()
+            return
+        # 摆一次，然后**按"内容是否真的压住容器"判定**是否收工。
+        # 只看 fit_browser 的返回值不够：内缩量量到了、摆位也做了，但浏览器
+        # 自己可能还在调整窗口（多进程站点常见），这一刻仍然是错位的。
+        self._L.fit_browser(self._hwnd, self.holder_hwnd())
+        if self._L.fit_ok(self._hwnd, self.holder_hwnd()):
+            self._fit_retry.stop()     # 真的对上了，收工
 
     def moveEvent(self, ev):
         """宿主一动，网页窗口立刻跟上。
 
         网页窗口是顶层窗口（这样中文输入法才正常），系统不会帮它跟随父窗口，
         所以每个 move 都得自己摆一次——**不要加防抖**，否则拖动时页面会掉队。
+        也**不要在这条路径上做任何等待**，理由见 refit。
         """
         super().moveEvent(ev)
         self.refit()
@@ -621,6 +657,12 @@ class WebChatHost(QWidget):
                 L.hide_browser(h)
         L.focus_browser(hwnd)
         QTimer.singleShot(400, self.refit)   # 浏览器晚一步微调时兜一下
+        # 等不及了也得显示（不能一直黑着），但**必须继续尝试摆正**：
+        # 千问/文心这类多进程站点，渲染子窗口可能 0.8 秒都还没出来，那时
+        # 内缩量量不到、页面就停在错位状态，而且以前再没人管它——
+        # 于是页面和侧边栏永远错着（用户反馈"主页面跟侧边栏分离、顶部不对齐"）。
+        if not L.fit_ok(hwnd, self.holder_hwnd()):
+            self._retry_fit()
 
     # ---------- 事件 ----------
     def changeEvent(self, ev):
@@ -672,6 +714,11 @@ class WebChatHost(QWidget):
             if t and t != self._title:
                 self._title = t
                 self.setWindowTitle("%s · 聚合AI" % t)
+        if self._hwnd and not self._L.fit_ok(self._hwnd, self.holder_hwnd()):
+            # 兜底自愈：走到这里说明页面和容器还是没对上（浏览器自己改了窗口、
+            # 系统 DPI 变了、重试窗口已经过期……）。心跳每 600ms 一次，代价极低，
+            # 但保证"错位"不会是个永久状态。
+            self.refit()
         self.bar.refresh_active()
 
 

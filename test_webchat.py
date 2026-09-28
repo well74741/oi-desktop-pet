@@ -30,6 +30,8 @@ import webchat_launcher as L
 import webchat_ui
 from widgets import kit
 
+HERE_WL = os.path.dirname(os.path.abspath(__file__))
+
 # ---------- 打桩：绝不碰用户数据、绝不开浏览器 ----------
 _REAL_LOAD_SITES = L.load_sites      # 第 2 节要用真实实现测合并逻辑
 
@@ -362,6 +364,39 @@ _spec = importlib.util.spec_from_file_location(
                               "webchat_launcher.py"))
 _WL = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_WL)
+
+# ---------- 摆位路径绝不阻塞主线程 ----------
+# 回归（用户报"打开聚合AI 除 deepseek 外整个桌宠非常卡，拖动时页面和侧边栏
+# 分离"）：fit_browser 里曾经有一句 browser_insets(hwnd, timeout=0.25)，
+# 而 moveEvent 每一帧都走 fit_browser —— 实测那一句在量不到时要 273ms，
+# 每帧预算只有 16.7ms，超了 16 倍，于是拖动时主线程僵住、页面跟不上容器。
+import time as _t_blk                                        # noqa: E402
+
+_real_fd = L._find_descendant
+L._find_descendant = lambda p, c: None       # 最坏情况：渲染子窗口永远查不到
+L._INSETS_CACHE.clear() if hasattr(L, "_INSETS_CACHE") else None
+try:
+    _t0 = _t_blk.perf_counter()
+    for _ in range(50):
+        L.browser_insets(4242)               # 摆位路径用的就是默认 timeout
+    _per = (_t_blk.perf_counter() - _t0) / 50.0 * 1000.0
+finally:
+    L._find_descendant = _real_fd
+check("摆位：量内缩量默认不等待（单次 %.2f ms，一帧预算 16.7ms）" % _per,
+      _per < 5.0)
+_src_wl = open(os.path.join(HERE_WL, "webchat_launcher.py"),
+               encoding="utf-8").read()
+_fit_blk = _src_wl[_src_wl.index("def fit_browser"):
+                   _src_wl.index("def _clip_to_content")]
+check("摆位：fit_browser 里没有任何带 timeout 的等待（moveEvent 每帧都走它）",
+      "timeout=" not in _fit_blk)
+_src_ui = open(os.path.join(HERE_WL, "webchat_ui.py"), encoding="utf-8").read()
+check("摆位：量不到时改为挂定时器异步重试，而不是原地等",
+      "_retry_fit" in _src_ui and "FIT_RETRY_TRIES" in _src_ui)
+check("摆位：显示之后仍然会继续纠正对齐（慢站点 0.8s 内起不来也能自愈）",
+      "if not L.fit_ok(hwnd, self.holder_hwnd()):" in _src_ui)
+check("摆位：定时心跳里有对齐兜底自愈（错位不会变成永久状态）",
+      "not self._L.fit_ok(self._hwnd, self.holder_hwnd())" in _src_ui)
 
 _WL._INSETS_CACHE.clear()
 _fit_args = []

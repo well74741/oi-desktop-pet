@@ -631,16 +631,18 @@ def fit_browser(hwnd, holder, insets=None):
     **绝不用 (0,0,0,0) 兜底**：零内缩等于"这窗口没有标题栏"，于是不挪不裁，
     浏览器自己那条标题栏就占住内容区顶部、整页往下错位，侧边栏也会被盖掉。
     缩放或切站点的一瞬间渲染子窗口查不到是常事，这时用上次量到的好值。
+
+    **这个函数必须是非阻塞的**：`WebChatHost.moveEvent` 每一帧都调它，
+    在这里同步等待（哪怕只有 0.25s）会把主线程卡死——拖动聚合AI 窗口时整个桌宠
+    僵住、网页跟不上容器，看起来就是"页面和侧边栏分离了"。量不到就直接返回，
+    让调用方安排一次异步重试。
     """
     try:
         rect = window_rect(holder)
         if not rect or rect[2] <= 0 or rect[3] <= 0:
             return None
+        # timeout 一律为 0：绝不在这条路径上等
         ins = insets or browser_insets(hwnd) or last_insets(hwnd)
-        if ins is None:
-            # 一次都没量到过：再给它一点时间，实在量不到就别乱摆（保持原样，
-            # 等下一次 refit），也比错位好
-            ins = browser_insets(hwnd, timeout=0.25)
         if ins is None:
             return None
         l, t, r, b = ins
