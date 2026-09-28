@@ -188,11 +188,42 @@ try:
                                         bool(u.IsWindowVisible(ctypes.c_void_p(hwnd)))))
     check("切站点后新页面也粘在宿主上",
           L.owner_of(host._hwnd) == int(host.winId()))
-    rw2 = L._find_descendant(host._hwnd, "Chrome_RenderWidgetHostHWND")
-    rr4, hr4 = L.window_rect(rw2), L.window_rect(holder)
+    # 切站点的一瞬间渲染子窗口可能还没建好（window_rect 会返回 None）。
+    # 这正是让页面错位的那个瞬态：insets 量不到，以前会退回 (0,0,0,0)，
+    # 于是不撑不裁、整页往下错、侧边栏被盖住。这里等它出来再断言。
+    rw2, rr4, hr4 = None, None, None
+    _dl = time.monotonic() + 5
+    while time.monotonic() < _dl:
+        rw2 = L._find_descendant(host._hwnd, "Chrome_RenderWidgetHostHWND")
+        rr4 = L.window_rect(rw2) if rw2 else None
+        hr4 = L.window_rect(holder)
+        if rr4 and hr4:
+            break
+        pump(0.05)
     check("切完之后新网页也正好铺满容器",
-          abs(rr4[2] - hr4[2]) <= 3 and abs(rr4[3] - hr4[3]) <= 3,
+          bool(rr4) and bool(hr4)
+          and abs(rr4[2] - hr4[2]) <= 3 and abs(rr4[3] - hr4[3]) <= 3,
           "内容=%s 容器=%s" % (rr4, hr4))
+    check("切站点后内缩量被记住了（下次量不到时才有好值可用）",
+          L.last_insets(host._hwnd) is not None,
+          "insets=%s" % (L.last_insets(host._hwnd),))
+    # 模拟那个瞬态：让 insets 量不到，再摆一次 —— 页面必须还在原位，
+    # 不能因为退回零内缩而整页错位
+    _real_bi = L.browser_insets
+    L.browser_insets = lambda h, timeout=0.0: None
+    try:
+        L.fit_browser(host._hwnd, holder)
+        pump(0.15)
+        rr5 = L.window_rect(
+            L._find_descendant(host._hwnd, "Chrome_RenderWidgetHostHWND"))
+        hr5 = L.window_rect(holder)
+        check("内缩量一瞬间量不到时，页面仍然正好压住容器（不退回零内缩）",
+              bool(rr5) and bool(hr5)
+              and abs(rr5[0] - hr5[0]) <= 3 and abs(rr5[1] - hr5[1]) <= 3
+              and abs(rr5[2] - hr5[2]) <= 3 and abs(rr5[3] - hr5[3]) <= 3,
+              "内容=%s 容器=%s" % (rr5, hr5))
+    finally:
+        L.browser_insets = _real_bi
     check("旧页面还活着（切回去是瞬间的，状态不丢）",
           L.window_alive(hwnd) and not u.IsWindowVisible(ctypes.c_void_p(hwnd)))
 

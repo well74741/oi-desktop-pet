@@ -206,6 +206,57 @@ check("滚动标题：控件销毁后登记表会自己收缩（不是只涨不�
 
 kit.set_bubble_scale(1.0)
 
+# ---------- 有 AI 功能的组件：AI 按钮统一放标题行 ----------
+# 拼豆一直是这样（用户说满意），画布的 AI 按钮却藏在展开后的悬浮工具栏里，
+# 收起状态点不到。这里只覆盖**真有 AI 功能**的组件——给没有 AI 能力的组件加个
+# 按钮才是坑。
+_AI_WIDGETS = ("canvas", "perler")
+for _n in _AI_WIDGETS:
+    _w, _e = load_module_widget(_n)
+    check("AI 按钮(%s)：组件能加载（%s）" % (_n, _e or "ok"), _w is not None)
+    if _w is None:
+        continue
+    _ai = getattr(_w, "_ai_btn", None)
+    check("AI 按钮(%s)：在标题行上，收起状态也点得到" % _n,
+          _ai is not None and _w._row is not None
+          and _ai.parent() is not None
+          and _ai.isVisibleTo(_w._row))
+    check("AI 按钮(%s)：有说明提示" % _n,
+          _ai is not None and "AI" in _ai.toolTip())
+
+# ---------- 画布工具按钮：跟着宽度自适应，且不探出画布 ----------
+_cv, _ = load_module_widget("canvas")
+if _cv is None:
+    check("画布工具栏：组件能加载", False)
+else:
+    _cv.resize(400, 260)
+    _cv.show()
+    app.processEvents()
+    _cv._toggle_fold()                 # 展开才有工具栏
+    app.processEvents()
+    _obs = []
+    for _cw in (200, 320, 480, 640):
+        _cv.resize(_cw, 260)
+        _cv._expand.resize(_cw, 240)
+        _cv._place_bar()
+        app.processEvents()
+        _obs.append((_cw, _cv._bar_btns[0].width(), _cv._bar.width(),
+                     _cv._bar_per_row))
+    _too_wide = [(w, bw) for w, _b, bw, _p in _obs if bw > w - 4]
+    check("画布工具栏：任何宽度下都在画布内（按钮不会被裁到点不着）",
+          not _too_wide, "探出去的：%s" % (_too_wide[:2],))
+    check("画布工具栏：按钮随宽度变大（%d px -> %d px）"
+          % (_obs[0][1], _obs[-1][1]), _obs[-1][1] > _obs[0][1])
+    check("画布工具栏：窄的时候换行而不是把按钮缩小到点不准（每行 %s）"
+          % ([p for _w, _b, _bw, p in _obs],),
+          _obs[0][3] < _obs[-1][3]
+          and _obs[0][1] >= kit.bubble_token("icon_button_width"))
+    check("画布工具栏：AI 按钮不在工具栏里重复出现（已挪到标题行）",
+          not hasattr(_cv, "_btn_ai"))
+    _cv.close()
+
+kit.set_bubble_scale(1.0)
+
 # ---------- 行高预算：与字体无关的公式不变式 ----------
 # 卡片上下各调一次 bs(1)，bs() 每次取整；行高预算若用 bs(2) 会差 1px，
 # 那正是 v0.9.10 "文字偏低出框" 的根因。

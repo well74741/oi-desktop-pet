@@ -593,8 +593,16 @@ def ghost_btn(text="", fixed_w=18, fixed_h=13, tip=""):
     return b
 
 
-# ==================== 弹窗按钮规范（QMessageBox / QInputDialog 通用） ====================
-# 统一形状（边框+圆角+底色）、适中尺寸。全局弹窗（main.py 的 QApplication QSS）与
+# ==================== 悬停提示（全局唯一一套） ====================
+# 提示框的样式**只准在这里定义一处**。以前设置窗一套深色、画布和另一个弹窗各自
+# 一套浅色、气泡里的模块行又什么都没写（于是吃系统调色板 ToolTipBase #ffffdc 那块
+# 黄底）——同一个气泡里悬停标题和悬停按钮能弹出两种长相。main.py 把它挂到
+# QApplication 上，所有窗口继承；谁都不要再写自己的 QToolTip 规则。
+TOOLTIP_QSS = ("QToolTip{background:#232a3a;color:#d5dbe8;"
+               "border:1px solid #4a5468;border-radius:4px;padding:3px 6px;}")
+
+
+# ==================== 弹窗按钮规范（QMessageBox / QInputDialog 通用） ====================# 统一形状（边框+圆角+底色）、适中尺寸。全局弹窗（main.py 的 QApplication QSS）与
 # kit.confirm / 各组件弹窗都用它，避免"有字没形状 / 忽大忽小"。
 DIALOG_BTN_QSS = (
     "QPushButton{min-width:52px;min-height:21px;font-size:10px;"

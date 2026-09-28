@@ -5932,7 +5932,6 @@ class SettingsDialog(_DarkDialog):
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #2fb8c0, stop:1 #4aa3ff);
         }
         QPushButton:disabled { color: #a0a8b8; background: #f0f3f8; border: 1px solid #e0e5ee; }
-        QToolTip { background: #ffffff; color: #3a3f55; border: 1px solid #c8d2e2; border-radius: 4px; padding: 3px 6px; }
         QMessageBox { background: #ffffff; }
         QMessageBox QLabel { color: #3a3f55; font-size: 11px; }
         QMessageBox QPushButton { min-width: 60px; }
@@ -6206,16 +6205,6 @@ class SettingsDialog(_DarkDialog):
         except Exception:
             self.cb_autostart.setEnabled(False)
         btn_layout.addWidget(self.cb_autostart)
-        # 任务栏可见性：桌宠默认是 Qt.Tool 工具窗，不占任务栏，代价是任务管理器
-        # 只在「后台进程」里列它。打开这项就能在「应用」里直接找到。
-        self.cb_taskbar = QCheckBox("在任务栏显示")
-        self.cb_taskbar.setChecked(
-            bool(self.settings.get("taskbar_visible", False)))
-        self.cb_taskbar.setToolTip(
-            "在任务栏显示桌宠窗口，任务管理器的「应用」里也能直接找到它。\n"
-            "关闭时桌宠是工具窗：不占任务栏、不进 Alt+Tab，任务管理器里仍可在\n"
-            "「后台进程」中找到「oi桌宠桌面宠物」。")
-        btn_layout.addWidget(self.cb_taskbar)
         btn_layout.addStretch()
         self.version_label = QLabel("v%s" % APP_VERSION)
         self.version_label.setToolTip("oi桌宠当前版本")
@@ -6297,8 +6286,8 @@ class SettingsDialog(_DarkDialog):
         """模块列表标题悬停：立即显示注释（唯一的一个提示）。
 
         第三个参数必须传 obj：不传的话 QToolTip 用的是系统调色板
-        ToolTipBase（#ffffdc，就是那块黄底），传了才会按这个控件的样式表
-        链找到设置窗那条深色 `QToolTip{...}` 规则。
+        ToolTipBase（#ffffdc，就是那块黄底），传了才会沿控件的样式表链找到
+        全局那条提示规则（kit.TOOLTIP_QSS，由 main.py 挂在 QApplication 上）。
         """
         try:
             if obj is getattr(self, "_rules_title_label", None):
@@ -6356,13 +6345,11 @@ class SettingsDialog(_DarkDialog):
             # 把 AI 新加的模块、按钮删掉
             self.temp_status_rules = list(self.settings.get("status_rules", []))
             self.slot_shortcuts = list(self.settings.get("slot_shortcuts", []))
-            for cb, k, d in ((self.cb_tooltips, "show_tooltips", True),
-                             (self.cb_taskbar, "taskbar_visible", False)):
-                v = bool(self.settings.get(k, d))
-                if cb.isChecked() != v:
-                    cb.blockSignals(True)
-                    cb.setChecked(v)
-                    cb.blockSignals(False)
+            v = bool(self.settings.get("show_tooltips", True))
+            if self.cb_tooltips.isChecked() != v:
+                self.cb_tooltips.blockSignals(True)
+                self.cb_tooltips.setChecked(v)
+                self.cb_tooltips.blockSignals(False)
             try:
                 self._refresh_rules_list()
             except Exception:
@@ -6426,7 +6413,6 @@ class SettingsDialog(_DarkDialog):
         self.settings["pet_size"] = self.temp_pet_size
         self.settings["pet_opacity"] = self.temp_pet_opacity
         self.settings["show_tooltips"] = self.cb_tooltips.isChecked()
-        self.settings["taskbar_visible"] = self.cb_taskbar.isChecked()
         self.settings["status_rules"] = self.temp_status_rules
         self.settings["status_custom_items"] = []
         self.settings["hidden_builtins"] = sorted(self._hidden_builtins)
@@ -6901,14 +6887,11 @@ class GravityPet(QWidget):
                 self.status_bubble.hide_animated()
 
     def _setup_window(self):
-        # Qt.Tool = WS_EX_TOOLWINDOW：不占任务栏，也不进 Alt+Tab。代价是任务
-        # 管理器只在「后台进程」里列它（名字是 exe 的 FileDescription），不在
-        # 「应用」里。想在「应用」里一眼找到就打开 taskbar_visible。
-        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        if not bool(self.settings.get("taskbar_visible", False)):
-            flags |= Qt.Tool
-        self._taskbar_applied = bool(self.settings.get("taskbar_visible", False))
-        self.setWindowFlags(flags)
+        # 不用 Qt.Tool：工具窗（WS_EX_TOOLWINDOW）虽然不占任务栏，但任务管理器
+        # 只会把它排进「后台进程」，用户在「应用」里找不到、也就没法强行结束它。
+        # 代价是任务栏多一个按钮、Alt+Tab 里也会出现，这是能被"找到并关掉"的价钱。
+        # WA_ShowWithoutActivating 保证它照旧不抢焦点。
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setWindowTitle("oi桌宠")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
@@ -6919,29 +6902,6 @@ class GravityPet(QWidget):
         s = QApplication.primaryScreen().availableGeometry()
         self.move(s.x() + (s.width() - self.width()) // 2,
                   s.y() + (s.height() - self.height()) // 2)
-
-    def apply_taskbar_visible(self, on):
-        """切换"在任务栏显示"：改窗口标志要重建原生窗口，得把几何和显示状态接回来。"""
-        on = bool(on)
-        if bool(self.settings.get("taskbar_visible", False)) == on \
-                and getattr(self, "_taskbar_applied", None) == on:
-            return
-        self.settings["taskbar_visible"] = on
-        self._taskbar_applied = on
-        pos = self.pos()
-        was_visible = self.isVisible()
-        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        if not on:
-            flags |= Qt.Tool
-        self.setWindowFlags(flags)
-        self.setWindowTitle("oi桌宠")
-        # setWindowFlags 会隐藏窗口并丢掉部分属性，逐一恢复
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.setWindowOpacity(self.pet_opacity)
-        self.move(pos)
-        if was_visible:
-            self.show()
 
     def _load_image(self):
         # 清理旧的 QMovie / webp 动图
@@ -7932,13 +7892,6 @@ class GravityPet(QWidget):
     def _apply_pet_settings(self):
         from widgets import kit as _kit
         bubble_changed, pet_scale_changed = self._apply_ui_scales()
-        # 任务栏可见性：改窗口标志会重建原生窗口，放在最前面做，后面的尺寸/
-        # 图片更新照常落在新窗口上
-        try:
-            self.apply_taskbar_visible(
-                self.settings.get("taskbar_visible", False))
-        except Exception as e:
-            _error_log("apply taskbar_visible failed: %r" % (e,))
         new_size = max(40, int(self.settings.get("pet_size",
                                   self.pet_config.get("size", 75))
                                   * _kit.pet_k()))

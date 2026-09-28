@@ -346,6 +346,63 @@ except Exception:
     pass
 app.processEvents()
 
+# ---------- 内缩量绝不退回 (0,0,0,0) ----------
+# 回归：fit_browser 原先写的是 `browser_insets(hwnd) or (0, 0, 0, 0)`。零内缩等于
+# "这窗口没有标题栏"，于是既不往外撑也不裁——浏览器自己那条标题栏就占住内容区
+# 顶部、整页往下错位，聚合AI 的侧边栏也被盖掉（用户反馈"侧边栏又没对齐了，
+# 标题被分界线切断"）。缩放/切站点的一瞬间渲染子窗口查不到是常事，这时必须用
+# 上一次量到的好值。
+import webchat_launcher as _WL_stubbed                        # noqa: E402,F401
+import importlib.util                                        # noqa: E402
+
+# 这个套件前面把 L.fit_browser 打了桩（第 70 行左右），直接用会拿到桩。
+# 单独加载一份全新的模块实例来测真实实现，两边互不干扰。
+_spec = importlib.util.spec_from_file_location(
+    "_wl_fresh", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "webchat_launcher.py"))
+_WL = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_WL)
+
+_WL._INSETS_CACHE.clear()
+_fit_args = []
+# 只桩掉最底层的两个 win32 查询，让真实的 browser_insets / fit_browser 跑起来
+# （缓存是在 browser_insets 内部填的，把它整个打桩就测不到东西了）。
+_HWND, _CHILD, _HOLDER = 4242, 1111, 9999
+_RECTS = {_HWND: (92, 169, 616, 439),      # 窗口（含标题栏/边框）
+          _CHILD: (100, 200, 600, 400),    # 渲染子窗口 = 内容区
+          _HOLDER: (100, 200, 600, 400)}   # 容器
+_have_child = [True]
+_WL.place_child = lambda h, r: _fit_args.append(("place", r))
+_WL._clip_to_content = lambda h, ins, w, hh: _fit_args.append(("clip", ins))
+_WL.window_rect = lambda h: _RECTS.get(int(h))
+_WL._find_descendant = lambda p, c: (_CHILD if _have_child[0] else None)
+_WL.SetWindowRgn_stub = None
+
+_ins1 = _WL.fit_browser(_HWND, _HOLDER)
+check("内缩：量到了就按它摆位", _ins1 == (8, 31, 8, 8))
+check("内缩：量到的值被记住了", _WL.last_insets(_HWND) == (8, 31, 8, 8))
+check("内缩：窗口往左上撑出标题栏的量，内容正好压住容器",
+      ("place", (92, 169, 616, 439)) in _fit_args)
+
+# 缩放/切站点的一瞬间渲染子窗口查不到 —— 必须复用上次的好值，不能变成零
+_fit_args[:] = []
+_have_child[0] = False
+_ins2 = _WL.fit_browser(_HWND, _HOLDER)
+check("内缩：量不到时复用上次的好值，不退回 (0,0,0,0)", _ins2 == (8, 31, 8, 8))
+check("内缩：复用时照样裁掉标题栏（不是整窗口都露出来）",
+      ("clip", (8, 31, 8, 8)) in _fit_args)
+check("内缩：复用时摆位和量到时完全一致（页面不会错位）",
+      ("place", (92, 169, 616, 439)) in _fit_args)
+
+# 从没量到过：宁可不摆，也不要用零内缩摆错
+_fit_args[:] = []
+check("内缩：从没量到过就不乱摆（返回 None，等下一次 refit）",
+      _WL.fit_browser(7777, _HOLDER) is None and not _fit_args)
+
+_WL.forget_insets(_HWND)
+check("内缩：解绑/清理后缓存没了（HWND 复用不会继承旧内缩）",
+      _WL.last_insets(_HWND) is None)
+
 check("用户数据没有被测试改写", SAVED == [])
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:

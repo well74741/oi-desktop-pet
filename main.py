@@ -224,6 +224,10 @@ class DesktopPetApp:
             from widgets import kit
             _btn = kit.DIALOG_BTN_QSS
             self.app.setStyleSheet(
+                # 悬停提示：全局一套，样式在 kit.TOOLTIP_QSS。挂在 QApplication 上
+                # 所有窗口才都继承得到——气泡里的模块行以前没人给它样式，吃的是
+                # 系统调色板那块黄底，同一个气泡能弹出两种长相的提示。
+                kit.TOOLTIP_QSS +
                 "QMessageBox{font-size:11px;} QMessageBox QLabel{font-size:11px;}"
                 "QInputDialog{font-size:11px;} QInputDialog QLabel{font-size:11px;}"
                 "QInputDialog QLineEdit,QInputDialog QPlainTextEdit{font-size:11px;}"

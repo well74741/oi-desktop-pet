@@ -795,7 +795,11 @@ class ChatPanel(QWidget):
             def _ph(w):
                 # setFixedHeight() 不改 sizeHint，只改 min/max——标题栏就是这么
                 # 被算少 7px 的。两者取大才是它真正要占的高度。
-                return max(w.sizeHint().height(), w.minimumHeight())
+                # 但也**必须夹上 maximumHeight**：折叠动画会把摘要行
+                # setFixedHeight(0)，而它的 sizeHint 仍是一行字的高度，不夹的话
+                # 这里会多算一行（实测展开末帧多出 24px）。
+                h = max(w.sizeHint().height(), w.minimumHeight())
+                return min(h, w.maximumHeight())
 
             parts = [_ph(self._bottom)]
             if self._header_widget is not None \
@@ -803,7 +807,10 @@ class ChatPanel(QWidget):
                 parts.append(_ph(self._header_widget))
             if self._quote_bar.isVisibleTo(self):
                 parts.append(_ph(self._quote_bar))
-            if self._collapsed:
+            if self.collapsed_label.isVisibleTo(self):
+                # 按**可见性**而不是 self._collapsed 来算：折叠动画期间这一行的
+                # 高度是从 0 长到满（或反过来）的，必须如实计入，否则内容高度和
+                # 外框高度对不上，多出来的空间会被布局塞给输入区（输入框被拉伸）。
                 parts.append(_ph(self.collapsed_label))
             # 可见部件之间各有一道间距；历史区那一道由调用方补
             return h + sum(parts) + lay.spacing() * max(0, len(parts) - 1)
@@ -841,7 +848,8 @@ class ChatPanel(QWidget):
             # 展开：模块外框逐帧变高，窗口随模块同步顶长（锚点固定）
             self._collapsed = False
             self.fold_btn.set_down(True)    # 展开态：向下三角（点击收起）
-            self.collapsed_label.hide()
+            # 摘要行**不在这里 hide**：它的高度由动画从满收到 0（见
+            # _start_hist_anim），收完了才在 _finish_fold 里真正藏掉。
             self.history.show()
             self.history.setMaximumHeight(_bs(150))
             self.history.setFixedHeight(0)
@@ -853,32 +861,59 @@ class ChatPanel(QWidget):
             # 收起：内容与外框下滑收拢（窗口不动），结束后平滑收气泡
             self._collapsed = True
             self.fold_btn.set_down(False)   # 收起态：向上三角（点击展开）
+            # 摘要行从 0 长到满，和消息区的收拢同步。以前它是等 _finish_fold
+            # 才出现的：整段动画里那一行的空位没人占，QVBoxLayout 就把它分给了
+            # 可伸缩的输入区——"消息栏在收，输入框却一直是拉伸的，最后一刻才
+            # 弹回正常高度"，看着就是卡顿。
+            try:
+                self._update_collapsed_label()
+            except Exception:
+                pass
+            self.collapsed_label.setFixedHeight(0)
+            self.collapsed_label.show()
             self.layout().setAlignment(self.history, Qt.AlignBottom)
             self._capture_fold_anchor()
             self._lock_bubble(True)
             self._start_hist_anim(float(self._calc_hist_h()), 0.0, total0)
 
+    def _collapsed_label_full_h(self):
+        """收起态摘要行摆满时该多高（动画的一个端点）。"""
+        from widgets import kit as _k
+        try:
+            return int(_k.row_height())
+        except Exception:
+            return _bs(19)
+
     def _start_hist_anim(self, h0, h1, total0=None):
         """历史区 h0->h1 的折叠动画。
 
-        `total0` 是点击前的真实外框高度。外框和历史区分别插值：收起态比展开态
-        多一行摘要标签，两端基座本来就不一样，只用终局基座算第一帧就会先跳一下
-        再开始动。给了 total0 之后，首帧严格等于点击前、末帧严格等于终局。
+        三个量一起插值，保证**每一帧内容高度都等于外框高度**：
+          - 历史区   h0 -> h1
+          - 摘要行   收起时 0 -> 满，展开时 满 -> 0
+          - 外框     点击前的真实高度 -> 终局真实高度
+        少了摘要行这一路，两端基座不一样（收起态多一行），中途的差额就会被布局
+        分给可伸缩的输入区，于是输入框在动画期间被拉伸/压扁，最后一刻才归位。
+        `total0` 是点击前的真实外框高度，首帧从它起步，不会先跳一下。
         """
-        # 动画每帧的"历史区以外"高度取终局值，全程恒定——中途变的话外框会抖
         sp = self.layout().spacing()
-        base = self._base_h()
-        if self._collapsed and not self.collapsed_label.isVisibleTo(self):
-            base += sp + self.collapsed_label.sizeHint().height()
-        elif not self._collapsed and self.collapsed_label.isVisibleTo(self):
-            base -= sp + self.collapsed_label.sizeHint().height()
-        self._fold_base = base + (sp if h1 > 0 or h0 > 0 else 0)
-        total1 = float(h1) + self._fold_base
+        lab = self.collapsed_label
+        full = self._collapsed_label_full_h()
+        lab0 = float(lab.height()) if lab.isVisibleTo(self) else 0.0
+        lab1 = float(full) if self._collapsed else 0.0
+        # 终局外框：把摘要行先摆成终局高度，问一次真实基座，再摆回来
+        lab.setFixedHeight(int(round(lab1)))
+        total1 = float(self._base_h()) + ((sp + float(h1)) if h1 > 0 else 0.0)
+        if lab1 <= 0:
+            # 终局会把摘要行 hide 掉，它在布局里那一道间距也就不存在了。
+            # 动画期间它一直是 visible（高度收到 0），_base_h 会替它算一道。
+            total1 -= sp
+        lab.setFixedHeight(int(round(lab0)))
         if total0 is None:
-            total0 = float(h0) + self._fold_base
+            total0 = float(self._base_h()) + ((sp + float(h0)) if h0 > 0 else 0.0)
         self._fold_anim = {"t0": time.monotonic(),
                            "dur": _dist_dur(total1 - total0),
                            "h0": h0, "h1": h1,
+                           "lab0": lab0, "lab1": lab1,
                            "tot0": float(total0), "tot1": total1}
         self._fold_timer.start(ANIM_MS)
         self._fold_tick()
@@ -896,6 +931,8 @@ class ChatPanel(QWidget):
             k = min(1.0, (time.monotonic() - a["t0"]) / max(0.01, a["dur"]))
             e = ease_in_out(k)            # 尺寸变化统一用两头慢的缓动
             h = a["h0"] + (a["h1"] - a["h0"]) * e
+            lab = a["lab0"] + (a["lab1"] - a["lab0"]) * e
+            self.collapsed_label.setFixedHeight(max(0, int(round(lab))))
             self.history.setFixedHeight(max(0, int(h)))
             # 模块外框（当前模块区域）同步收放；窗口本身不缩放，避免重影
             self._bubble_fold_height(int(round(self._fold_total(a, e))))
@@ -914,6 +951,8 @@ class ChatPanel(QWidget):
             self.layout().setAlignment(self.history, Qt.Alignment())   # 恢复默认填充
             self.history.setMaximumHeight(_bs(16) if self._collapsed else _bs(150))
             self.history.setFixedHeight(16777215)   # 解除固定，交给外层布局
+            # 摘要行的高度在动画里被逐帧改过，收尾要还原成正常的一行高
+            self.collapsed_label.setFixedHeight(self._collapsed_label_full_h())
             if self._collapsed:
                 self.collapsed_label.show()
             else:

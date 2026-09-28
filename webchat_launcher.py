@@ -539,11 +539,17 @@ def _find_descendant(parent, cls_prefix):
         return None
 
 
+_INSETS_CACHE = {}
+
+
 def browser_insets(hwnd, timeout=0.0):
     """网页内容区相对窗口矩形的四边内缩 (左, 上, 右, 下)，物理像素。
 
     直接问渲染子窗口（`Chrome_RenderWidgetHostHWND`）在哪，比猜标题栏常数准，
     也自动跟着 DPI 走。量不到返回 None。
+
+    量到的值会按 hwnd 记一份：缩放/切站点途中渲染子窗口可能一瞬间查不到，
+    这时宁可用上一次的好值，也不能退回 (0,0,0,0)——见 `last_insets()`。
     """
     import time
     t0 = time.monotonic()
@@ -557,10 +563,20 @@ def browser_insets(hwnd, timeout=0.0):
                 r = (wr[0] + wr[2]) - (rr[0] + rr[2])
                 b = (wr[1] + wr[3]) - (rr[1] + rr[3])
                 if 0 <= l < 120 and 0 <= t < 240 and 0 <= r < 120 and 0 <= b < 120:
+                    _INSETS_CACHE[int(hwnd)] = (l, t, r, b)
                     return (l, t, r, b)
         if time.monotonic() - t0 >= timeout:
             return None
         time.sleep(0.03)
+
+
+def last_insets(hwnd):
+    """这个窗口上一次量到的内缩；从没量到过返回 None。"""
+    return _INSETS_CACHE.get(int(hwnd))
+
+
+def forget_insets(hwnd):
+    _INSETS_CACHE.pop(int(hwnd), None)
 
 
 def glue_browser(hwnd, owner):
@@ -611,12 +627,22 @@ def fit_browser(hwnd, holder, insets=None):
     holder 的**屏幕**矩形就是网页该占的位置（网页窗口是顶层窗口，坐标是屏幕
     坐标）。窗口往左上挪、往外撑 insets，内容区就正好落在 holder 上；多出来的
     标题栏/边框用 `SetWindowRgn` 裁掉——顶层窗口没有父窗口帮它裁，只能自己裁。
+
+    **绝不用 (0,0,0,0) 兜底**：零内缩等于"这窗口没有标题栏"，于是不挪不裁，
+    浏览器自己那条标题栏就占住内容区顶部、整页往下错位，侧边栏也会被盖掉。
+    缩放或切站点的一瞬间渲染子窗口查不到是常事，这时用上次量到的好值。
     """
     try:
         rect = window_rect(holder)
         if not rect or rect[2] <= 0 or rect[3] <= 0:
             return None
-        ins = insets or browser_insets(hwnd) or (0, 0, 0, 0)
+        ins = insets or browser_insets(hwnd) or last_insets(hwnd)
+        if ins is None:
+            # 一次都没量到过：再给它一点时间，实在量不到就别乱摆（保持原样，
+            # 等下一次 refit），也比错位好
+            ins = browser_insets(hwnd, timeout=0.25)
+        if ins is None:
+            return None
         l, t, r, b = ins
         x, y, w, h = rect
         place_child(hwnd, (x - l, y - t, w + l + r, h + t + b))
@@ -664,6 +690,7 @@ def fit_ok(hwnd, holder, tol=3):
 
 def unglue_browser(hwnd):
     """解开与宿主的 owner 关系、去掉窗口区域，还原成一个正常的独立窗口。"""
+    forget_insets(hwnd)     # HWND 会被系统回收复用，别让下一个窗口继承旧内缩
     try:
         u, ctypes, wt = _style_api()
         st = u.GetWindowLongW(ctypes.c_void_p(hwnd), _GWL_STYLE) & 0xFFFFFFFF

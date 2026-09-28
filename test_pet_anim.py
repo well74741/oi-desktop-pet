@@ -206,9 +206,34 @@ check("提示：showText 传了控件（才能吃到设置窗的深色 QToolTip 
       bool(_shown) and len(_shown[0]) >= 3 and _shown[0][2] is title,
       "参数 %d 个" % (len(_shown[0]) if _shown else 0))
 qss = dlg.styleSheet()
-tip_rule = qss[qss.index("QToolTip"):qss.index("QToolTip") + 60]
-check("提示：设置窗的 QToolTip 规则是深色的", "#232a3a" in tip_rule,
-      tip_rule.replace("\n", " ").strip())
+# 提示框样式**只准有一处定义**：kit.TOOLTIP_QSS，由 main.py 挂到 QApplication。
+# 以前设置窗自己一套（浅色经 _DARK_SUBS 变深）、画布一套浅色、气泡里的模块行
+# 干脆没样式（吃系统调色板 #ffffdc 黄底）——同一个气泡里悬停标题和悬停按钮
+# 会弹出两种长相，这就是用户报的"两种风格的标签"。
+from widgets import kit as _kit_tip                             # noqa: E402
+
+check("提示：全局只有一处定义（kit.TOOLTIP_QSS）",
+      "QToolTip" in _kit_tip.TOOLTIP_QSS and "#232a3a" in _kit_tip.TOOLTIP_QSS)
+check("提示：设置窗不再自带 QToolTip 规则（否则会盖掉全局那条）",
+      "QToolTip" not in qss)
+_tip_srcs = []
+for _f in ("pet_gravity.py", "bubble_ui.py", "bubble_layout.py",
+           "widgets/canvas.py", "widgets/perler.py", "widgets/stats.py",
+           "widgets/tokenmeter.py", "widgets/todo.py", "widgets/notes.py"):
+    try:
+        _txt = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), _f),
+                    encoding="utf-8").read()
+    except Exception:
+        continue
+    if "QToolTip{" in _txt or "QToolTip {" in _txt:
+        # 只算真正的样式表字符串，注释里提一嘴不算
+        if any(('"' in _ln or "'" in _ln) and "QToolTip" in _ln
+               and not _ln.strip().startswith("#")
+               and "`QToolTip" not in _ln
+               for _ln in _txt.splitlines()):
+            _tip_srcs.append(_f)
+check("提示：没有别的文件再写自己的 QToolTip 规则", not _tip_srcs,
+      "还在写的：" + "、".join(_tip_srcs))
 dlg.deleteLater()
 
 # ---------- 10. 空菜单盘：开合动画要和有按钮时一样收得干净 ----------

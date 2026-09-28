@@ -52,13 +52,32 @@ class FakeBubble:
 
     def __init__(self):
         self.wrap_heights = []
+        self.bottoms = []
         self.relayouts = 0
+        self.panel = None
 
     def _current_side(self):
         return "above"
 
+    def x(self):
+        return 100
+
+    def y(self):
+        return 100
+
+    def height(self):
+        return self.wrap_heights[-1] if self.wrap_heights else 0
+
     def _fold_set_height(self, panel, wh):
+        # 真实气泡每帧就是把模块摆到动画要求的高度，这里照做，
+        # 才能量到输入区（对话框栏）在动画期间是不是被拉伸/压扁
         self.wrap_heights.append(int(wh))
+        try:
+            panel.setFixedHeight(int(wh))
+            panel.layout().activate()
+            self.bottoms.append(panel._bottom.height())
+        except Exception:
+            pass
 
     def _relayout(self):
         self.relayouts += 1
@@ -82,6 +101,7 @@ app.processEvents()
 # 然后才开始动——就是"窗口跳了一帧才开始动画"。
 _h_before_fold = p.current_height()
 b.wrap_heights = []
+b.bottoms = []
 p.toggle_collapse()
 dl = time.time() + 1
 while time.time() < dl and p._fold_anim is not None:
@@ -91,12 +111,28 @@ app.processEvents()
 check("收起：动画首帧 = 点击前高度，不先跳一下（%d vs %d）"
       % (b.wrap_heights[0] if b.wrap_heights else -1, _h_before_fold),
       bool(b.wrap_heights) and abs(b.wrap_heights[0] - _h_before_fold) <= 1)
+# 输入区（对话框栏）必须全程保持终局高度。以前收起态那一行摘要是等动画结束才
+# 出现的，整段动画里它的空位（约一行 + 一道间距）没人占，QVBoxLayout 就分给了
+# 可伸缩的输入区 —— "消息栏在收，输入框却一直拉伸着，最后一刻才弹回去"。
+_final_bottom = p._bottom.height()
+check("收起：输入区全程保持终局高度，不在动画里被拉伸（最大偏离 %d px）"
+      % (max(abs(x - _final_bottom) for x in b.bottoms) if b.bottoms else -1),
+      bool(b.bottoms)
+      and max(abs(x - _final_bottom) for x in b.bottoms) <= 3)
+check("收起：末帧 = 面板自报的终局高度（不用最后再补一次）",
+      bool(b.wrap_heights)
+      and abs(b.wrap_heights[-1] - p.current_height()) <= 1)
+check("收起：摘要行参与了动画（高度从 0 长到一行，不是突然冒出来）",
+      p.collapsed_label.isVisibleTo(p)
+      and p.collapsed_label.height() == p._collapsed_label_full_h())
 check("收起动画完成", p._collapsed and not b._fold_locked
-      and len(b.wrap_heights) > 5 and b.wrap_heights[-1] <= b.wrap_heights[0])
+      and len(b.wrap_heights) > 5
+      and b.wrap_heights[-1] <= b.wrap_heights[0])
 check("折叠按钮朝上", not p.fold_btn._down)
 
 _h_before_unfold = p.current_height()
 b.wrap_heights = []
+b.bottoms = []
 p.toggle_collapse()
 dl = time.time() + 1
 while time.time() < dl and p._fold_anim is not None:
@@ -109,8 +145,29 @@ check("展开：动画首帧 = 点击前高度，不先塌一下（%d vs %d）"
 check("展开：全程单调变高，不来回抖",
       all(b.wrap_heights[i] <= b.wrap_heights[i + 1] + 1
           for i in range(len(b.wrap_heights) - 1)))
+_final_bottom2 = p._bottom.height()
+check("展开：输入区全程保持终局高度（最大偏离 %d px）"
+      % (max(abs(x - _final_bottom2) for x in b.bottoms) if b.bottoms else -1),
+      bool(b.bottoms)
+      and max(abs(x - _final_bottom2) for x in b.bottoms) <= 3)
+check("展开：末帧 = 面板自报的终局高度",
+      bool(b.wrap_heights)
+      and abs(b.wrap_heights[-1] - p.current_height()) <= 1)
+check("展开：摘要行收到 0 之后被藏掉（不占位）",
+      not p.collapsed_label.isVisibleTo(p))
 check("展开动画完成", not p._collapsed and not b._fold_locked)
 check("折叠按钮朝下", p.fold_btn._down)
+# _base_h 必须夹上 maximumHeight：折叠动画把摘要行 setFixedHeight(0)，而它的
+# sizeHint 还是一行字的高度，不夹就会多算一行（实测展开末帧多出 24px）。
+p.collapsed_label.show()
+p.collapsed_label.setFixedHeight(0)
+_b0 = p._base_h()
+p.collapsed_label.setFixedHeight(p._collapsed_label_full_h())
+_b1 = p._base_h()
+p.collapsed_label.hide()
+p.collapsed_label.setFixedHeight(p._collapsed_label_full_h())
+check("基座高度：摘要行被压到 0 时不再按 sizeHint 多算一行（%d < %d）"
+      % (_b0, _b1), _b0 < _b1)
 
 # ---------- 4. 消息导航 ----------
 p._messages = msgs

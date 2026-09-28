@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.19 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.20 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -166,6 +166,51 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.20：聚合AI 错位根因 + 提示样式收归一处 + 画布工具栏自适应 + 对话折叠补完 2026-09-28】
+  - **聚合AI 侧边栏错位、标题被分界线切断**（用户反馈）。根因在
+    `fit_browser`：`browser_insets(hwnd) or (0, 0, 0, 0)`。零内缩等于"这窗口
+    没有标题栏"，于是既不往外撑、也不裁——浏览器自己那条 **31px 标题栏**占住
+    内容区顶部、**8px 左边框**盖住侧边栏边缘（实测内缩量就是 `(8,31,8,8)`）。
+    而缩放 / 切站点的一瞬间渲染子窗口 `Chrome_RenderWidgetHostHWND` 查不到是
+    常事（`timeout=0.0` 单次尝试），一量空就错位。
+    改成：量到的值按 hwnd 记一份（`last_insets()`），量不到就复用上次的好值；
+    一次都没量到过则**宁可不摆**（返回 None，等下一次 refit），绝不用零内缩
+    摆错。`unglue_browser` 里清缓存，免得 HWND 被系统复用后继承旧内缩。
+    `_check_host.py` 升到 25 项，新增"内缩量一瞬间量不到时页面仍正好压住容器"
+    —— 直接把那个瞬态做出来验。
+  - **任务管理器里找不到桌宠**。桌宠原先是 `Qt.Tool` 工具窗，任务管理器只把它
+    排进「后台进程」，用户在「应用」里找不到、也就没法强行结束。按用户要求
+    **去掉 v0.9.19 那个勾选项**，改成无条件当普通顶层窗口 → 进「应用」分组。
+    代价是任务栏多一个按钮、Alt+Tab 里也会出现，这是"找得到并关得掉"的价钱；
+    `WA_ShowWithoutActivating` 保留，照旧不抢焦点。
+  - **悬停提示两种长相**。以前设置窗一套（浅色经 `_DARK_SUBS` 变深）、画布一套
+    浅色、气泡里的模块行干脆没样式（于是吃系统调色板 `ToolTipBase #ffffdc`
+    那块黄底）。新增 `kit.TOOLTIP_QSS` 作为**唯一定义**，main.py 挂到
+    QApplication 上全局继承；删掉 pet_gravity 与 canvas 里的两条。
+    `test_pet_anim.py` 加了一条"没有别的文件再写自己的 QToolTip 规则"防复发。
+  - **画布工具按钮太小 / AI 按钮不在标题行**。① AI 按钮挪到标题行（和拼豆一致，
+    收起状态也点得到），工具栏里那颗删掉（本来就挤），Ctrl+A 照旧。
+    ② 工具按钮改成按可用宽度缩放，夹在 [基准, 基准×2.2]：实测画布 200→640px
+    时按钮 24→46px。③ **窄画布换行而不是缩小**——9 个按钮按基准要 230px，比
+    200px 的画布还宽，不换行右边几个会被裁在画布外根本点不到；缩小又回到
+    "按钮太小"的老毛病。实测每行 4/8/9/9 个，任何宽度下工具栏都在画布内。
+    ④ 颜色行（色块 + 粗细滑条）同样会撑宽，也跟着缩（滑条先让位）。
+    注意：`kit.bs(16)` 不是 16px——`bs()` 跟界面基准走，在这里等于 24，
+    拿它当"下限"等于没有下限。
+  - **AI 助手收起时输入栏被拉伸、最后一刻才归位**。收起态比展开态多一行摘要，
+    而那一行以前是等 `_finish_fold` 才 `show()` 的：整段动画里它的空位
+    （一行 + 一道间距）没人占，`QVBoxLayout` 就分给了可伸缩的输入区。
+    现在摘要行的高度**也参与动画**（收起 0→满 / 展开 满→0），`_base_h()` 改成
+    按**可见性**而不是 `self._collapsed` 计入它。实测两个方向首帧=点击前、
+    末帧=终局（差 0），输入区全程偏离终值 ≤2px（就是一道 spacing 的取整）。
+    连带修了 `_base_h()` 里的 `_ph()`：它只取 `max(sizeHint, minimumHeight)`，
+    忽略 `maximumHeight`，于是摘要行被 `setFixedHeight(0)` 之后仍按一行字上报，
+    展开末帧多出 24px。现在夹上上限。
+  - 测试：`test_bubble.py` 125→132、`test_geometry.py` 52→62、
+    `test_webchat.py` 54→62、`test_pet_anim.py` 52、`test_settings_sync.py`
+    21→19（去掉了勾选项那几条，换成"不许再有开关"）。9 个套件在开发（3.14）与
+    打包（3.12）两个解释器上都全通过；`_check_host.py` 真实 Edge 窗口 25 项全过。
 
 - 【v0.9.19：折叠按钮统一成带底色的「展开」+ 三处动画补齐 + 标题滚动 + 任务栏可见 2026-09-28】
   - **折叠按钮不再自造一套**。v0.9.18 在行标题栏加的是箭头 `_FoldButton`，
@@ -1532,16 +1577,16 @@ PyInstaller 6.21（打包）。
 
 ```powershell
 python run_all_tests.py                           # 一键跑完所有套件（打包闸门用的也是它）
-python -u test_bubble.py                          # 气泡/模块契约/行几何/折叠动画回归测试（125 项）
+python -u test_bubble.py                          # 气泡/模块契约/行几何/折叠动画回归测试（132 项）
 python -u test_components_scale.py                 # 组件缩放回归测试
 python -u test_templates.py                        # 模块模板验证（111 项，新增模板必跑）
-python -u test_webchat.py                          # 聚合AI：站点/摆位/粘住网页窗口/切换不闪/输入法/打开入口（54 项）
+python -u test_webchat.py                          # 聚合AI：站点/摆位/粘住/切换不闪/输入法/内缩缓存（62 项）
 python -u test_pet_anim.py                         # 倾角动画 + 空盘开合 + 提示排版 + 悬停提示 + 动图暂停（50 项）
-python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性 + 任务栏可见（21 项，沙箱隔离）
+python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性 + 任务管理器可见（19 项，沙箱隔离）
 python -u test_autostart.py                        # 开机自启读写与自愈（19 项，沙箱注册表键）
 python -u test_data_store.py                       # 原子写 + 每日滚动快照（13 项）
-python -u test_geometry.py                         # 几何不变式：三档 × 不出框/同中线/标题滚动（52 项）
-python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（23 项，临时 profile，跑完即删）
+python -u test_geometry.py                         # 几何不变式：三档 × 不出框/同中线/标题滚动/画布工具栏（62 项）
+python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（25 项，临时 profile，跑完即删）
 python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位
 python _prune_dist.py [--dry] [保留版本数]         # 清理 dist 历史产物（打包脚本已自动调）
 python _make_backup.py                            # 备份

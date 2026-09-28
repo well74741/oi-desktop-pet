@@ -349,9 +349,9 @@ class Widget(ModuleWidget):
 
     FIX_H = 15
     _QSS = (
-        "QToolTip{background:rgba(255,255,255,230);color:#333333;"
-        "border:1px solid rgba(187,187,187,160);border-radius:3px;"
-        "padding:3px 6px;font-family:Microsoft YaHei;font-size:8pt;}"
+        # 提示框不在这里定义：全局唯一一套在 kit.TOOLTIP_QSS（main.py 挂到
+        # QApplication）。这里以前有一套浅色的，于是同一个气泡里悬停画布按钮
+        # 和悬停别的模块会弹出两种长相。
         "QPushButton{border:none;border-radius:3px;padding:0 4px;"
         "font-family:Microsoft YaHei;font-size:10px;color:#dbe3f0;background:transparent;}"
         "QPushButton:hover{background:rgba(74,144,226,120);color:#ffffff;}"
@@ -378,9 +378,14 @@ class Widget(ModuleWidget):
 
         self._fold_btn = kit.expand_btn("展开")   # 渐变蓝胶囊按钮
         self._fold_btn.clicked.connect(self._toggle_fold)
+        # AI 按钮放标题行，和拼豆一致：收起状态也点得到，不用先展开再去悬浮
+        # 工具栏里找（工具栏本来就挤）。
+        self._ai_btn = kit.ghost_btn("AI", 22, 13,
+                                     "AI 绘画：让 AI 按描述在画布上作画 (Ctrl+A)")
+        self._ai_btn.clicked.connect(self._ai_draw)
         # 标题/摘要/动作统一走模块行规范，避免每个组件手写一行布局。
         self._row, rl, self._title, _summary = kit.module_row(
-            "画布", actions=(self._fold_btn,))
+            "画布", actions=(self._ai_btn, self._fold_btn))
         self._root.addWidget(self._row)
 
         # ---- 展开区 ----
@@ -463,6 +468,7 @@ class Widget(ModuleWidget):
             b.setIconSize(QSize(13, 13))
             b.setText("")
         self._bar_row1_lay.addWidget(b)
+        self._bar_btns.append(b)     # 供 _fit_bar_btns 按宽度统一调尺寸
         return b
 
     @staticmethod
@@ -472,6 +478,7 @@ class Widget(ModuleWidget):
 
     def _build_bar(self):
         ic = self._pix_icon
+        self._bar_btns = []
         self._btn_select = self._b("", "选择/框选 (V)", True, ic("arrow"))
         self._btn_pen = self._b("", "画笔 (P)", True, ic("pen"))
         self._btn_erase = self._b("", "橡皮擦 (E)", True, ic("eraser"))
@@ -490,8 +497,8 @@ class Widget(ModuleWidget):
         self._btn_paste.clicked.connect(self._paste)
         self._btn_del.clicked.connect(self._delete_selected)
         self._btn_clear.clicked.connect(self._clear_all)
-        self._btn_ai = self._b("", "AI 绘画 (Ctrl+A)", False, ic("ai"))
-        self._btn_ai.clicked.connect(self._ai_draw)
+        # AI 按钮已经挪到标题行（和拼豆一致），工具栏里不再重复放一个——
+        # 这排本来就挤，按钮小得点不准。Ctrl+A 快捷键照旧。
         # 收纳工具栏：收起为右上角小三角按钮，再点还原（展开朝右/收纳朝左，风格一致）
         self._btn_bar_fold = self._b("", "收纳工具栏", False, ic("fold"))
         self._btn_bar_fold.clicked.connect(self._toggle_bar)
@@ -590,8 +597,114 @@ class Widget(ModuleWidget):
             except Exception:
                 pass
 
+    def _fit_bar_btns(self, avail_w):
+        """工具按钮按可用宽度放大/缩小，排不下就换行。
+
+        以前是死的 `bubble_token("icon_button_*")`：气泡拉宽了按钮还是那么小，
+        画笔/橡皮这些高频按钮点不准（用户反馈"按钮太小"）。现在按这一排能分到
+        多少宽度算，夹在 [基准, 基准×2.2] 之间。
+
+        **不能靠缩小来塞下**：基准尺寸已经是"能点准"的下限（bs() 跟界面基准走，
+        再小就成了原来那个毛病）。所以窄画布下改成换行——9 个按钮按基准要 230px，
+        比 200px 的画布还宽，不换行右边几个会被裁在画布外根本点不到。
+        """
+        btns = getattr(self, "_bar_btns", None)
+        if not btns:
+            return
+        n = len(btns)
+        base_w = kit.bubble_token("icon_button_width")
+        base_h = kit.bubble_token("icon_button_height")
+        m = self._bar_v.contentsMargins()
+        sp = self._bar_row1_lay.spacing()
+        chrome = m.left() + m.right() + kit.bs(8)   # 8 = 距画布右边缘留白
+        # 工具栏悬浮在画布上，最多占七成宽，别糊住整幅画
+        budget = max(base_w + chrome, int(avail_w) * 0.70)
+        per = (budget - chrome - sp * (n - 1)) / float(n)
+        w = int(max(base_w, min(per, base_w * 2.2)))
+        h = int(max(base_h, min(w * base_h / float(max(1, base_w)),
+                                base_h * 2.2)))
+        # 一行放得下几个（至少 1 个，免得除出 0）
+        per_row = max(1, int((budget - chrome + sp) // max(1, w + sp)))
+        per_row = min(per_row, n)
+        for b in btns:
+            try:
+                if b.width() != w or b.height() != h:
+                    b.setFixedSize(w, h)
+                    b.setIconSize(QSize(max(kit.bubble_token("icon"),
+                                            int(w * 0.72)),
+                                        max(kit.bubble_token("icon"),
+                                            int(w * 0.72))))
+            except RuntimeError:
+                pass
+        if per_row != getattr(self, "_bar_per_row", None):
+            self._bar_per_row = per_row
+            self._reflow_bar_rows(per_row, h)
+        self._fit_bar_row2(budget - chrome, sp)
+
+    def _fit_bar_row2(self, budget, sp):
+        """颜色行（色块 + 粗细滑条）也得跟着宽度缩放。
+
+        按钮行换行之后，撑宽整条工具栏的就轮到这一行了：色块 + 78px 的滑条
+        一共要 230px 左右，窄画布下工具栏照样探出画面。滑条是这里唯一可伸缩的
+        东西，先让它让位，不够再缩色块。
+        """
+        cbs = getattr(self, "_color_btns", None)
+        sl = getattr(self, "_width_slider", None)
+        if not cbs or sl is None:
+            return
+        nc = len(cbs)
+        sw_max, sw_min = kit.bs(9), max(6, kit.bs(9) // 2)
+        sl_max, sl_min = kit.bs(52), kit.bs(22)
+        # 先按色块最大尺寸算滑条还能剩多少
+        need_cb = nc * sw_max + sp * nc
+        sl_w = int(max(sl_min, min(sl_max, budget - need_cb)))
+        sw = sw_max
+        if need_cb + sl_w > budget:      # 还是不够，色块跟着缩
+            sw = int(max(sw_min, (budget - sl_w - sp * nc) / float(nc)))
+        for cb in cbs:
+            try:
+                if cb.width() != sw:
+                    cb.setFixedSize(sw, sw)
+            except RuntimeError:
+                pass
+        try:
+            if sl.width() != sl_w:
+                sl.setFixedWidth(sl_w)
+        except RuntimeError:
+            pass
+
+    def _reflow_bar_rows(self, per_row, row_h):
+        """把工具按钮重新分配到若干行（只在每行个数变化时做，不是每帧）。"""
+        rows = getattr(self, "_bar_rows", None)
+        if rows is None:
+            rows = self._bar_rows = [self._bar_row1]
+        need = (len(self._bar_btns) + per_row - 1) // per_row
+        while len(rows) < need:          # 不够就补一行，插在颜色行前面
+            host = QWidget(self._bar)
+            lay = QHBoxLayout(host)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(self._bar_row1_lay.spacing())
+            self._bar_v.insertWidget(len(rows), host)
+            rows.append(host)
+        for i, b in enumerate(self._bar_btns):
+            host = rows[i // per_row]
+            # 必须先从原来的布局里摘掉：光 setParent 会在旧布局里留一个空 item，
+            # 旧行的 sizeHint 还是 9 个按钮那么宽，工具栏根本不会缩。
+            old = b.parent()
+            if old is not None and old.layout() is not None:
+                old.layout().removeWidget(b)
+            if old is not host:
+                b.setParent(host)
+            host.layout().addWidget(b)
+            b.show()
+        for i, host in enumerate(rows):
+            host.setVisible(i < need)
+            if i < need:
+                host.setFixedHeight(row_h)
+
     def _place_bar(self):
         w = self._expand.width()
+        self._fit_bar_btns(w)
         self._bar.adjustSize()
         self._bar.move(max(2, w - self._bar.width() - 4), 4)
         self._bar.raise_()
