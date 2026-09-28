@@ -184,7 +184,7 @@ bub._update_rows_inplace([("t", "CPU", "CPU", "50%", None)], 100)
 bub._update_rows_inplace([("t", "CPU", "CPU", "60%", None)], 100)
 check("增量刷新跳过未变化行", len(calls) == 1 and calls[-1] == ("CPU", "60%"))
 check("内容签名已记录",
-      row._last_content == ("CPU", "60%", False, "", "ok"))
+      row._last_content == ("CPU", "60%", False, "", "ok", ""))
 
 # ---------- 7. 模块健康状态与设计令牌 ----------
 rules = module_core.normalize_rules([
@@ -530,7 +530,65 @@ _cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(4)]
 _cb._relayout()
 app.processEvents()
 check("分列：行变少会收回单列", _cb._ncols == 1 and _cb.width() == _cb._FIX_W)
+
+# 多列时每列是**独立一块背景**、各自按内容长短：一整块大背景会让只放一个模块
+# 的第二列下面拖着一大片空白
+_cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(10)]
+_cb._relayout()
+_cb.show()
+app.processEvents()
+_p = _cb._col_panels
+check("分列背景：一列一块，不是一整块", len(_p) == _cb._ncols == 2)
+check("分列背景：两块紧贴（第二块起点 = 第一块右缘）", _p[1][0] == _p[0][2])
+check("分列背景：短的那列明显更短（长度自适应）", _p[1][3] < _p[0][3] - 40)
+check("分列背景：窗口高度 = 最高那列", _cb._full_h == max(x[3] for x in _p))
+check("分列背景：每行都落在自己那块板子里",
+      all(any(px <= r.left() and r.right() <= px + pw and r.bottom() <= py + ph
+              for px, py, pw, ph in _p)
+          for r in [_cb._row_rect(w) for w in _cb._row_widgets]))
+_m = _cb.mask()
+check("分列背景：短列下方的空白被遮罩挖掉（不挡鼠标）",
+      not _m.isEmpty()
+      and not _m.contains(_QPt(_p[1][0] + _p[1][2] // 2, _p[1][3] + 20))
+      and _m.contains(_QPt(_p[1][0] + _p[1][2] // 2, _p[1][3] // 2)))
+_cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(4)]
+_cb._relayout()
+app.processEvents()
+check("分列背景：单列时不设遮罩（和以前行为一致）", _cb.mask().isEmpty())
 _cb.close()
+
+# ---------- 失败原因直接写在值区 ----------
+# 以前失败只显示"获取失败"，真正原因藏在标题的悬停提示里——得把鼠标停上去才知道
+# 是自己断网了还是接口挂了。
+_cases = [("HTTP Error 503: Service Unavailable", "服务端错误"),
+          ("<urlopen error timed out>", "超时"),
+          ("urlopen error [Errno 11001] getaddrinfo failed", "没网"),
+          ("HTTP Error 401: Unauthorized", "Key 无效"),
+          ("HTTP Error 429: Too Many Requests", "太频繁"),
+          ("SSLCertVerificationError: certificate verify failed", "证书错误"),
+          ("HTTP Error 404: Not Found", "地址不存在"),
+          ("JSONDecodeError: Expecting value", "返回格式不对"),
+          ("HTTP Error 418: I'm a teapot", "418")]
+_wrong = [(m, bubble_layout.short_error(m), w) for m, w in _cases
+          if bubble_layout.short_error(m) != w]
+if _wrong:
+    print("  没对上的映射:", _wrong[:3])
+check("失败原因：常见报错都能压成一句短话", not _wrong)
+check("失败原因：认不出来的报错不瞎猜（返回空，保持原值）",
+      bubble_layout.short_error("某种没见过的错") == ""
+      and bubble_layout.short_error("") == "")
+_er = _LTextRow()
+_er.set_content("天气", "获取失败", 120,
+                state={"kind": "error", "error": "HTTP Error 503"})
+check("失败原因：值区显示原因，不再只写「获取失败」",
+      _er.value._text == "服务端错误")
+check("失败原因：完整报错仍保留在标题悬停提示里", "503" in _er.title.toolTip())
+_er.set_content("天气", "获取失败", 120,
+                state={"kind": "error", "error": "timed out"})
+check("失败原因：原因变了值区跟着变（签名带上了它，不会被增量刷新跳过）",
+      _er.value._text == "超时")
+_er.set_content("天气", "26°C", 120, state={"kind": "ok"})
+check("失败原因：恢复正常后显示真实值", _er.value._text == "26°C")
 
 # ---------- 汇总 ----------
 print("\n==== %d passed, %d failed ====" % (len(PASS), len(FAIL)))

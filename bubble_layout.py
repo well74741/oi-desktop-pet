@@ -13,7 +13,7 @@ StatusBubble 的旧手绘呈现已退役（不可达）。此版本与基类共�
 import html
 import time
 
-from PyQt5.QtCore import Qt, QPoint, QRect, QSize
+from PyQt5.QtCore import Qt, QPoint, QRect, QRectF, QSize
 from PyQt5.QtGui import (QColor, QFont, QFontMetrics, QPainter, QPen,
                          QContextMenuEvent)
 from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QPushButton, QSizePolicy,
@@ -71,6 +71,42 @@ def _kit_sc_qss(qss):
 
 
 _BTN_MARK = "__btn__"   # 按钮行标记：_disp_rows 的 widget 槽传它，_relayout 生成 _LBtnRow
+
+# 失败原因 → 值区里显示的短标签（按先后顺序匹配，命中即止）
+_ERR_HINTS = (
+    (("timed out", "timeout", "读取超时", "超时"), "超时"),
+    (("getaddrinfo", "name or service not known", "nodename nor servname",
+      "temporary failure in name resolution", "无法解析", "dns"), "没网"),
+    (("connection refused", "unreachable", "连接被拒", "网络不可达",
+      "connectionreset", "connection aborted", "远程主机强迫关闭"), "连不上"),
+    (("certificate", "ssl", "证书"), "证书错误"),
+    (("401", "unauthorized", "api key", "api_key", "invalid key",
+      "incorrect api"), "Key 无效"),
+    (("403", "forbidden"), "没权限"),
+    (("429", "rate limit", "too many requests"), "太频繁"),
+    (("500", "502", "503", "504", "bad gateway", "server error"), "服务端错误"),
+    (("404", "not found"), "地址不存在"),
+    (("json", "decode", "解析"), "返回格式不对"),
+)
+
+
+def short_error(msg):
+    """把一长串报错压成值区能显示的几个字；认不出来就返回空串。
+
+    以前失败只显示"获取失败"、真正的原因藏在标题的悬停提示里——得把鼠标停上去
+    才知道是自己断网了还是接口挂了。值区直接给结论，一眼就能判断该不该管。
+    """
+    low = str(msg or "").lower()
+    if not low.strip():
+        return ""
+    for keys, label in _ERR_HINTS:
+        for k in keys:
+            if k in low:
+                return label
+    # HTTP Error 418 之类：至少把状态码捞出来
+    import re as _re
+    m = _re.search(r"\b([45]\d\d)\b", low)
+    return m.group(1) if m else ""
 
 
 def _forward_ctx_menu(self, event):
@@ -236,9 +272,13 @@ class _LTextRow(QWidget):
 
     def set_content(self, title, value, avail_w, pending=False, link_href="",
                     state=None):
+        # 签名里必须带上"失败原因的短标签"：同样是 kind=error、值同样是
+        # "获取失败"，原因从 503 变成超时时值区要跟着变，不带它就会被增量刷新
+        # 判成"没变化"而不重渲染。
         self._last_content = (str(title), str(value or ""),
                               bool(pending), str(link_href),
-                              str((state or {}).get("kind", "ok")))
+                              str((state or {}).get("kind", "ok")),
+                              short_error((state or {}).get("error")))
         # 标题放不下时省略号 + 悬停提示，避免截断后无法查看完整名称
         try:
             fm_t = QFontMetrics(_font7())
@@ -282,6 +322,13 @@ class _LTextRow(QWidget):
         self.value.setStyleSheet("")
         # 多行内容归一为单行（模块行是单行滚动字幕，换行会被裁成半行）
         plain = str(value or "").replace("\r\n", "\n").replace("\n", " ｜ ")
+        # 失败时把原因写进值区：只留"获取失败"的话，得把鼠标停到标题上才知道
+        # 是自己断网还是接口挂了。认得出来的才替换，认不出来保持原样。
+        if kind == "error":
+            hint = short_error(error)
+            if hint:
+                plain = hint
+                self.value.setStyleSheet("color:#e2a0a0;")
         fm = QFontMetrics(_font7())
         if link_href:
             # 智能体待审批：值 + 审批链接
@@ -788,7 +835,8 @@ class StatusBubbleLayout(StatusBubble):
                     link_href = "approve://" + str(title)
                 state = self._row_state(i, title, pending)
                 sig = (str(title), str(value or ""), bool(pending), str(link_href),
-                       str(state.get("kind", "ok")))
+                       str(state.get("kind", "ok")),
+                       short_error(state.get("error")))
                 if getattr(wrap, "_last_content", None) != sig:
                     # 内容变化才重渲染，未变化的行零开销（增量刷新）
                     wrap.set_content(title, value, avail,
@@ -827,26 +875,32 @@ class StatusBubbleLayout(StatusBubble):
             self._layout_rows(rows)
             cols = self._split_columns(rows)
         ncols = max(1, len(cols))
+        col_w = int(width)
         for col in self._columns:
-            col.setFixedWidth(int(width))      # 档位变了列宽也要跟着变
-        tallest = 0
+            col.setFixedWidth(col_w)           # 档位变了列宽也要跟着变
+        # 每列各自算自己的高度：多列时**不是一整块背景**，短的那列就该短一截，
+        # 不然第二列只放一个小模块时下面会拖着一大片空白。
+        pad = m.top() + m.bottom() + _kit_sc_b(4)
+        floor_h = self._HEAD_H + _kit_sc_b(8)
+        col_hs = []
         for group in cols:
             t = sum(self._row_h(w) for w in group) + max(0, len(group) - 1) * gap
-            tallest = max(tallest, t)
-        full_h = max(self._HEAD_H + _kit_sc_b(8),
-                     tallest + m.top() + m.bottom() + _kit_sc_b(4))
-        width = int(width) * ncols
+            col_hs.append(max(floor_h, t + pad))
+        full_h = max(col_hs) if col_hs else floor_h
+        width = col_w * ncols
         self._ncols = ncols
         self._full_h = full_h
+        # 每列一块背景板（画在 paintEvent 里）：紧贴排列，各自高度自适应
+        self._col_panels = [(i * col_w, 0, col_w, h) for i, h in enumerate(col_hs)]
+        self._apply_col_mask(width, full_h)
         self.setFixedWidth(width)
         self._content.setGeometry(0, 0, width, full_h)
         # 列自己摆位 + 立刻跑一次列内布局：气泡是隐藏着算好尺寸再显示的，
         # 靠 Qt 自己调度的话这两步要等到显示之后才发生，其间行的坐标全是错的
         # （拖拽命中会点错行，同一列的行还会挤在同一个 y 上）。
-        col_w = int(width // ncols)
         for i, col in enumerate(self._columns):
             if i < ncols:
-                col.setGeometry(i * col_w, 0, col_w, full_h)
+                col.setGeometry(i * col_w, 0, col_w, col_hs[i])
                 col.show()
             else:
                 col.hide()
@@ -939,12 +993,47 @@ class StatusBubbleLayout(StatusBubble):
         return QSize(self._FIX_W,
                      getattr(self, "_full_h", self._HEAD_H + _kit_sc_b(8)))
 
+    def _apply_col_mask(self, width, full_h):
+        """短列下面那块空白要"不存在"：用窗口遮罩把它挖掉。
+
+        不挖的话那块地方虽然是透明的，但仍属于气泡窗口，鼠标点不到底下的桌面/
+        其他窗口——一块看不见却挡手的区域。遮罩用矩形并集（比实际画出来的圆角
+        是超集），圆角该有的抗锯齿一点不受影响。
+        单列时不设遮罩：保持和以前完全一致的行为。
+        """
+        try:
+            from PyQt5.QtGui import QRegion
+            panels = getattr(self, "_col_panels", None) or []
+            if len(panels) <= 1:
+                self.clearMask()
+                return
+            reg = QRegion()
+            for x, y, w, h in panels:
+                reg = reg.united(QRegion(int(x), int(y), int(w),
+                                         min(int(h), int(full_h))))
+            self.setMask(reg)
+        except Exception:
+            pass
+
     def paintEvent(self, event):
+        """画背景板：**每列一块**，紧贴排列、各自按内容长短。
+
+        多列时如果只画一整块大背景，短的那一列下面会拖着一大片空白（第二列只放
+        一个小模块时特别明显）。所以按 `_col_panels` 一列一块地画：相邻两列边缘
+        贴在一起，圆角各自成形，看起来就是"并排的两块面板"。
+        """
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setBrush(QColor(28, 32, 44, 255))   # 底色完全不透明，透明度交给滑块（窗口透明度）
         p.setPen(QPen(QColor(255, 255, 255, 45), 1))
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
+        r = _kit_sc_b(6)
+        panels = getattr(self, "_col_panels", None) or [(0, 0, self.width(),
+                                                         self.height())]
+        for x, y, w, h in panels:
+            h = min(int(h), self.height())     # 折叠动画期间窗口可能更矮
+            if w <= 2 or h <= 2:
+                continue
+            p.drawRoundedRect(QRectF(x + 1, y + 1, w - 2, h - 2), r, r)
         p.end()
 
     def _ui_tick(self):
