@@ -30,6 +30,8 @@ import bubble_ui
 import status_monitor
 import bubble_layout
 import module_core
+import data_store
+from widgets import load_module_widget
 from bubble_ui import StatusBubble, ChatPanel, _chat_html
 
 check("status_monitor 再导出 ChatPanel/StatusBubble",
@@ -556,6 +558,110 @@ _cb._relayout()
 app.processEvents()
 check("分列背景：单列时不设遮罩（和以前行为一致）", _cb.mask().isEmpty())
 _cb.close()
+
+# ---------- 组件行的展开 / 收起按钮 ----------
+# 便签、待办这类长条组件占掉半个气泡，得能一键收成一条标题栏。三件事要守住：
+# 状态落盘（重启还在）、动画平滑单调（不许跳、不许回弹）、收起态扛得住定时刷新
+# （刷新会走 _relayout 重建所有行，实测过正在动的那一行被连根删掉）。
+_fold_sand = tempfile.mkdtemp(prefix="oi_test_rowfold_")
+_ds_dir_bak = data_store.DATA_DIR
+data_store.DATA_DIR = _fold_sand
+import pet_gravity as _PG                                    # noqa: E402
+if os.path.abspath(_fold_sand) not in os.path.abspath(_PG.get_config_path()):
+    print("!! 配置路径没被隔离，拒绝继续:", _PG.get_config_path())
+    sys.exit(2)
+
+_notes, _nerr = load_module_widget("notes")
+check("组件行收起：便签组件能加载（%s）" % (_nerr or "ok"), _notes is not None)
+_fb = StatusBubbleLayout(FakePet2())
+_fb.pet.settings = {}
+_fb._refresh = lambda *a, **k: None      # 测试没有真规则表，别让后台刷新清掉假数据行
+for _t in ("_timer", "_mv_timer"):
+    _tm = getattr(_fb, _t, None)
+    if _tm is not None:
+        _tm.stop()
+_fb._disp_rows = [("CPU", "50%", None), ("便签", "", _notes)]
+_fb._relayout()
+_fb.show()
+app.processEvents()
+_wrap = [w for w in _fb._row_widgets
+         if isinstance(w, bubble_layout._LWidgetRow)][0]
+_h_open, _bub_open = _wrap.height(), _fb.height()
+check("组件行收起：长条组件带上了收起按钮", hasattr(_wrap, "fold_btn")
+      and _wrap.fold_btn.isVisibleTo(_wrap) and not _wrap.is_collapsed())
+
+_seq = []
+_bubseq = []
+_wrap.fold_btn.click()
+_dl = time.time() + 2
+while time.time() < _dl and getattr(_fb, "_rowfold", None) is not None:
+    app.processEvents()
+    time.sleep(0.004)
+    if not _seq or _seq[-1] != _wrap.height():
+        _seq.append(_wrap.height())
+        _bubseq.append(_fb.height())
+app.processEvents()
+_steps = [_seq[i] - _seq[i + 1] for i in range(len(_seq) - 1)]
+check("组件行收起：收起后只剩一条标题栏，组件被藏起来",
+      _wrap.is_collapsed() and _wrap.height() == _wrap.collapsed_height()
+      and not _notes.isVisible())
+check("组件行收起：气泡跟着矮下去（省了 %d px）" % (_bub_open - _fb.height()),
+      _fb.height() < _bub_open - 40)
+# 整框必须**每一帧**跟着行走。之前整框尺寸交给 _start_settle 再跑一段 0.16s
+# 补位动画：行在动、框也在动，两段各算各的时间，框慢半拍、末尾补最后几像素，
+# 就是用户说的"收完还弹一下"。
+_lag = [abs((_bubseq[i] - _bubseq[-1]) - (_seq[i] - _seq[-1]))
+        for i in range(len(_seq))]
+check("组件行收起：整框每帧都跟着行走，不慢半拍（最大偏差 %d px）"
+      % (max(_lag) if _lag else 0),
+      bool(_lag) and max(_lag) <= 2)
+check("组件行收起：整框也是单调收窄，没有二段补位动画",
+      all(_bubseq[i] >= _bubseq[i + 1] for i in range(len(_bubseq) - 1)))
+check("组件行收起：动画一停，框就已经在最终尺寸上（不再补一段）",
+      _fb.height() == _fb._full_h and not _fb._settle_active)
+check("组件行收起：动画是一段一段走的，不是一帧切（%d 帧）" % len(_seq),
+      len(_seq) >= 8)
+check("组件行收起：全程单调递减，中途不回弹（最大回弹 %d px）"
+      % (-min(_steps) if _steps and min(_steps) < 0 else 0),
+      all(s >= 0 for s in _steps))
+check("组件行收起：单帧跨度不超过总高差的三成（最大 %d / 总 %d）"
+      % (max(_steps) if _steps else 0, _h_open - _wrap.height()),
+      bool(_steps) and max(_steps) <= max(12, (_h_open - _wrap.height()) * 0.3))
+check("组件行收起：末尾停在目标高度上，不用再补一次动画",
+      _seq[-1] == _wrap.collapsed_height() and not _fb._fold_locked)
+check("组件行收起：状态入库（重启后还是收起的）",
+      _fb.pet.settings.get("collapsed_widgets") == ["w:1"])
+_saved = json.load(open(_PG.get_config_path(), encoding="utf-8"))
+check("组件行收起：状态写进了配置文件（沙箱内）",
+      _saved.get("collapsed_widgets") == ["w:1"])
+
+# 定时刷新会重建所有行——收起态必须从 settings 里重新读出来，不能被刷掉
+_fb._relayout()
+app.processEvents()
+_wrap2 = [w for w in _fb._row_widgets
+          if isinstance(w, bubble_layout._LWidgetRow)][0]
+check("组件行收起：刷新重建行之后，收起态还在",
+      _wrap2.is_collapsed()
+      and _wrap2.height() == _wrap2.collapsed_height())
+check("组件行收起：重建后按钮状态也对得上（朝下 = 可展开）",
+      not _wrap2.fold_btn._down)
+
+_wrap2.fold_btn.click()
+_dl = time.time() + 2
+while time.time() < _dl and getattr(_fb, "_rowfold", None) is not None:
+    app.processEvents()
+    time.sleep(0.004)
+app.processEvents()
+check("组件行收起：再点一次完整还原（行高 %d → %d）"
+      % (_wrap2.collapsed_height(), _wrap2.height()),
+      not _wrap2.is_collapsed() and _wrap2.height() == _h_open
+      and _notes.isVisible())
+check("组件行收起：展开后状态从库里清掉",
+      _fb.pet.settings.get("collapsed_widgets") == [])
+_fb.close()
+data_store.DATA_DIR = _ds_dir_bak
+import shutil as _sh                                          # noqa: E402
+_sh.rmtree(_fold_sand, ignore_errors=True)
 
 # ---------- 失败原因直接写在值区 ----------
 # 以前失败只显示"获取失败"，真正原因藏在标题的悬停提示里——得把鼠标停上去才知道

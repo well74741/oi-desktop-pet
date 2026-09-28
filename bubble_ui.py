@@ -45,6 +45,44 @@ def _kit_scale():
         return 1.0
 
 
+# ==================== 动画统一口径 ====================
+# 气泡里所有开合/补位动画共用这一套，保证"风格一致、全程顺滑"：
+# - 一律 60fps（16ms）。折叠动画原来用 24ms，0.22s 只出 11 帧、单帧跳 37px，
+#   就是用户说的"一跳一跳"。
+# - 缓动一律 ease_out_cubic：起步最快、越接近终点越慢，收尾自然停住，不过冲。
+#   （smoothstep 头尾都慢，中段反而更陡，帧少时跳得更明显。）
+ANIM_MS = 16
+ANIM_FOLD_DUR = 0.26        # 对话面板收起/展开（还会按距离拉长，见 _fold_dur）
+ANIM_OPEN_DUR = 0.18        # 气泡整体弹出/收回
+ANIM_SETTLE_DUR = 0.16      # 内容变化后的补位
+
+
+def ease_out(k):
+    """头快尾慢，终点导数为 0：适合淡入淡出这类"出现/消失"。"""
+    k = 0.0 if k < 0.0 else (1.0 if k > 1.0 else k)
+    return 1.0 - (1.0 - k) ** 3
+
+
+def ease_in_out(k):
+    """两头都慢、中段匀速（smoothstep）：**尺寸和位置变化一律用这个**。
+
+    ease_out 起步最快，折叠 224px 时第一帧就要跳 48px，看着像"咔"一下；
+    两头慢的曲线把位移摊开，起步和收尾都贴着 0 速度，才是"流畅矢量"的观感。
+    """
+    k = 0.0 if k < 0.0 else (1.0 if k > 1.0 else k)
+    return k * k * (3.0 - 2.0 * k)
+
+
+def _dist_dur(dist, base=ANIM_FOLD_DUR, lo=0.18, hi=0.40):
+    """按位移距离拉长时长：距离大就多给点时间，单帧步长才不会失控。
+
+    固定时长的话，收起 500px 的面板和收起 80px 的用一样的时间，前者每帧要跳
+    好几倍——同一套动画看起来快慢不一。
+    """
+    d = abs(float(dist))
+    return max(lo, min(hi, base * (d / 220.0) ** 0.5)) if d > 1 else lo
+
+
 def _bs(v):
     """气泡内逻辑像素按气泡档位缩放（同 widgets.kit.bs）。"""
     try:
@@ -784,7 +822,7 @@ class ChatPanel(QWidget):
             # 基座高度用动画开始时算好的那份，全程恒定，免得中途变化导致抖动。
             a = self._fold_anim
             k = min(1.0, (time.monotonic() - a["t0"]) / max(0.01, a["dur"]))
-            e = k * k * (3.0 - 2.0 * k)   # 与 _fold_tick 的平滑步进保持一致
+            e = ease_in_out(k)            # 与 _fold_tick 用同一条缓动
             h = a["h0"] + (a["h1"] - a["h0"]) * e
             return int(h) + self._fold_base
         if not self._messages:
@@ -828,8 +866,9 @@ class ChatPanel(QWidget):
         elif not self._collapsed and self.collapsed_label.isVisibleTo(self):
             base -= sp + self.collapsed_label.sizeHint().height()
         self._fold_base = base + (sp if h1 > 0 or h0 > 0 else 0)
-        self._fold_anim = {"t0": time.monotonic(), "dur": 0.22, "h0": h0, "h1": h1}
-        self._fold_timer.start(24)
+        self._fold_anim = {"t0": time.monotonic(), "dur": _dist_dur(h1 - h0),
+                           "h0": h0, "h1": h1}
+        self._fold_timer.start(ANIM_MS)
         self._fold_tick()
 
     def _fold_tick(self):
@@ -839,7 +878,7 @@ class ChatPanel(QWidget):
             if a is None:
                 return
             k = min(1.0, (time.monotonic() - a["t0"]) / max(0.01, a["dur"]))
-            e = k * k * (3.0 - 2.0 * k)   # 平滑步进：头尾都慢，避免首帧大步跳
+            e = ease_in_out(k)            # 尺寸变化统一用两头慢的缓动
             h = a["h0"] + (a["h1"] - a["h0"]) * e
             self.history.setFixedHeight(max(0, int(h)))
             # 模块外框（当前模块区域）同步收放；窗口本身不缩放，避免重影
@@ -2269,13 +2308,13 @@ class StatusBubble(QWidget):
         self._anim_h0 = float(self.height())
         self._anim_h1 = float(self._full_h if to_full else 0.0)
         self._anim_t0 = time.monotonic()
-        self._anim_dur = 0.18
-        self._anim_timer.start(16)
+        self._anim_dur = ANIM_OPEN_DUR
+        self._anim_timer.start(ANIM_MS)
 
     def _height_tick(self):
         if self._settle_active:
-            k = min(1.0, (time.monotonic() - self._settle_t0) / 0.15)
-            e = 1.0 - (1.0 - k) ** 3
+            k = min(1.0, (time.monotonic() - self._settle_t0) / ANIM_SETTLE_DUR)
+            e = ease_in_out(k)
             w = int(self._settle_w1 + (self._settle_w2 - self._settle_w1) * e)
             h = int(self._settle_h1 + (self._settle_h2 - self._settle_h1) * e)
             x = int(self._settle_x1 + (self._settle_x2 - self._settle_x1) * e)
@@ -2287,7 +2326,7 @@ class StatusBubble(QWidget):
                 self._place()
             return
         k = min(1.0, (time.monotonic() - self._anim_t0) / self._anim_dur)
-        e = 1.0 - (1.0 - k) ** 3
+        e = ease_out(k)
         h = int(self._anim_h0 + (self._anim_h1 - self._anim_h0) * e)
         self._apply_height(h)
         # 透明度随动画同帧变化：展开淡入、收起淡出，单定时器驱动
@@ -2331,7 +2370,7 @@ class StatusBubble(QWidget):
         self._settle_x2, self._settle_y2 = x2, y2
         self._settle_w2, self._settle_h2 = w2, h2
         self._settle_t0 = time.monotonic()
-        self._anim_timer.start(16)
+        self._anim_timer.start(ANIM_MS)
 
     def enterEvent(self, e):
         self._mouse_over = True

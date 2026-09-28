@@ -13,7 +13,7 @@ StatusBubble 的旧手绘呈现已退役（不可达）。此版本与基类共�
 import html
 import time
 
-from PyQt5.QtCore import Qt, QPoint, QRect, QRectF, QSize
+from PyQt5.QtCore import Qt, QPoint, QRect, QRectF, QSize, QTimer
 from PyQt5.QtGui import (QColor, QFont, QFontMetrics, QPainter, QPen,
                          QContextMenuEvent)
 from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QPushButton, QSizePolicy,
@@ -436,7 +436,12 @@ class _LBtnRow(QWidget):
 
 
 class _LWidgetRow(QWidget):
-    """交互组件行：手柄（卡片外） + 卡片（标题栏 + 组件本体）。"""
+    """交互组件行：手柄（卡片外） + 卡片（标题栏 + 组件本体）。
+
+    标题栏右端有个收起按钮：便签、待办这类"长条"组件很占地方，收起后只剩一条
+    标题栏。自带标题栏的组件（画布/拼豆/统计/Token/对话面板）本来就有自己的
+    展开控件，这里不会重复加——它们传进来的标题是空的，整条标题栏都不显示。
+    """
 
     _TITLE_H = 15          # 标题栏高度（有标题时）
     def __init__(self, parent=None):
@@ -453,22 +458,55 @@ class _LWidgetRow(QWidget):
         self._card_lay.setContentsMargins(_kit_sc_b(5), _kit_sc_b(1),
                                           _kit_sc_b(5), _kit_sc_b(1))
         self._card_lay.setSpacing(_kit_sc_b(2))
-        # 标题栏：在卡片内顶部（对话面板有自己的标题栏，会隐藏此行）
-        self._title_label = QLabel("", self._card)
+        # 标题栏：标题 + 右端收起按钮（在卡片内顶部）
+        from widgets import kit
+        from bubble_ui import _FoldButton
+        self._head = QWidget(self._card)
+        self._head.setAttribute(Qt.WA_TranslucentBackground, True)
+        _hb = QHBoxLayout(self._head)
+        _hb.setContentsMargins(0, 0, 0, 0)
+        _hb.setSpacing(_kit_sc_b(4))
+        self._title_label = QLabel("", self._head)
         self._title_label.setFont(_font7())
         self._title_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._title_label.setStyleSheet("color:#96a7c4;background:transparent;")
-        from widgets import kit
-        self._title_label.setFixedHeight(kit.row_height())
-        self._title_label.hide()
-        self._card_lay.addWidget(self._title_label)
+        _hb.addWidget(self._title_label, 1)
+        self.fold_btn = _FoldButton(self._head)
+        self.fold_btn.setCursor(Qt.PointingHandCursor)
+        self.fold_btn.setToolTip("收起 / 展开这个模块")
+        self.fold_btn.set_down(True)          # 展开态：向下三角（点一下收起）
+        self.fold_btn.clicked.connect(self._on_fold_clicked)
+        _hb.addWidget(self.fold_btn, 0)
+        # 标题栏高度必须正好是 row_height：title_extra() 按它算行高预算
+        self._head.setFixedHeight(kit.row_height())
+        self._head.hide()
+        self._card_lay.addWidget(self._head)
         self._lay.addWidget(self._card, 1)
         self._widget = None
+        self._collapsed = False
+        self.on_fold = None        # 由气泡挂上：点了收起按钮之后谁来播动画/存状态
+
+    def _on_fold_clicked(self):
+        if self.on_fold is not None:
+            self.on_fold(self)
+
+    def set_collapsed(self, on):
+        """收起 = 藏掉组件本体，只留标题栏（高度由外层按 title_extra 给）。"""
+        on = bool(on)
+        self._collapsed = on
+        self.fold_btn.set_down(not on)        # 收起态：向上三角（点一下展开）
+        if self._widget is not None:
+            self._widget.setVisible(not on)
+
+    def is_collapsed(self):
+        return bool(self._collapsed)
 
     def set_title(self, title):
         t = str(title or "").strip()
         self._title_label.setText(t)
-        self._title_label.setVisible(bool(t))
+        # 整条标题栏（标题 + 收起按钮）跟着标题一起显隐：自带标题栏的组件
+        # 传空标题进来，它们有自己的展开控件，不该再多一条
+        self._head.setVisible(bool(t))
         # 无框架标题的组件（画布/拼豆/统计/Token 等自带标题栏）：卡片上下内边距
         # 归零，把整行高度让给组件。否则组件按 row_height 算好的 15px 会被上下
         # 各 1px 边距挤成 13px，自带标题栏里的「展开」按钮就嵌不正。
@@ -477,7 +515,7 @@ class _LWidgetRow(QWidget):
 
     def has_title(self):
         # 用 isHidden 而非 isVisible：布局阶段组件可能尚未显示，isVisible 会误判
-        return not self._title_label.isHidden()
+        return not self._head.isHidden()
 
     def title_extra(self):
         """Exact vertical chrome added above an embedded widget."""
@@ -487,6 +525,12 @@ class _LWidgetRow(QWidget):
         m = self._card_lay.contentsMargins()
         return (kit.row_height() + self._card_lay.spacing()
                 + m.top() + m.bottom())
+
+    def collapsed_height(self):
+        """收起之后这一行有多高：只剩标题栏那一条。"""
+        from widgets import kit
+        m = self._card_lay.contentsMargins()
+        return kit.row_height() + m.top() + m.bottom()
 
     def set_state(self, state):
         state = dict(state or {})
@@ -746,14 +790,11 @@ class StatusBubbleLayout(StatusBubble):
                     # 标题栏：对话面板自带标题栏，其余组件（待办/番茄/面板等）统一加
                     wrap.set_title(title
                                    if not isinstance(widget, ChatPanel) else "")
+                    wrap.on_fold = self._on_row_fold
+                    wrap.set_collapsed(self._is_row_collapsed(key))
                     wrap.setFixedWidth(width - self._out_m
                                        - (self._out_m + self._handle_w))
-                    # 显式指定交互行高度：对话面板等没有 sizeHint，交给布局会缩成一行
-                    wh = (widget.current_height()
-                          if hasattr(widget, "current_height")
-                          else _widget_height(widget, width - 24))
-                    wrap.setFixedHeight(max(10, int(wh))
-                                        + wrap.title_extra())
+                    wrap.setFixedHeight(self._wrap_height(wrap, widget, width, key))
                     wrap._ridx = len(new_wraps)
                     new_wraps.append(wrap)
                     used_cache.add(key)
@@ -815,18 +856,20 @@ class StatusBubbleLayout(StatusBubble):
                         wrap.set_widget(widget)
                         wrap.set_title(title
                                        if not isinstance(widget, ChatPanel) else "")
+                        wrap.on_fold = self._on_row_fold
                         wrap.setFixedWidth(self._FIX_W - self._out_m
                                            - (self._out_m + self._handle_w))
-                        wh = (widget.current_height()
-                              if hasattr(widget, "current_height")
-                              else _widget_height(widget, self._FIX_W - 24))
-                        target = max(10, int(wh)) + wrap.title_extra()
-                        if int(wrap.minimumHeight()) != target:
+                        target = self._wrap_height(wrap, widget, self._FIX_W, key)
+                        # 收起动画进行中的那一行别动它的高度，否则每次刷新都会
+                        # 把动画中间值打回终值，看起来就是一顿一顿的
+                        busy = (getattr(self, "_rowfold", None) or {}).get("wrap")
+                        if busy is not wrap and int(wrap.minimumHeight()) != target:
                             wrap.setFixedHeight(target)
                         if wrap.has_title():
                             wrap.set_state(self._row_state(i, title))
                         wrap.show()          # 隐藏->重开时确保重新显示
-                        widget.show()
+                        if not wrap.is_collapsed():
+                            widget.show()
                     continue
                 pending = bool(title in self._pending_titles)
                 link_href = ""
@@ -858,14 +901,146 @@ class StatusBubbleLayout(StatusBubble):
             import traceback
             traceback.print_exc()
 
+    # ---------- 组件行的收起 / 展开 ----------
+    def _collapsed_keys(self):
+        """哪些模块是收起的：存进 settings，重启之后还记得。"""
+        s = getattr(self.pet, "settings", None)
+        if not isinstance(s, dict):
+            return set()
+        v = s.get("collapsed_widgets")
+        if not isinstance(v, list):
+            v = []
+            s["collapsed_widgets"] = v
+        return set(str(x) for x in v)
+
+    def _is_row_collapsed(self, key):
+        return str(key) in self._collapsed_keys()
+
+    def _wrap_height(self, wrap, widget, width, key):
+        """组件行该多高：收起就只留标题栏，展开按组件自己要的高度。"""
+        if wrap.is_collapsed():
+            return wrap.collapsed_height()
+        # 显式指定交互行高度：对话面板等没有 sizeHint，交给布局会缩成一行
+        wh = (widget.current_height() if hasattr(widget, "current_height")
+              else _widget_height(widget, width - 24))
+        return max(10, int(wh)) + wrap.title_extra()
+
+    def _on_row_fold(self, wrap):
+        """点了组件行标题栏上的收起按钮：存状态 + 播一段高度动画。"""
+        try:
+            key = None
+            for k, w in self._wrap_cache.items():
+                if w is wrap:
+                    key = str(k)
+                    break
+            target = not wrap.is_collapsed()
+            s = getattr(self.pet, "settings", None)
+            if isinstance(s, dict) and key:
+                keys = self._collapsed_keys()
+                keys.add(key) if target else keys.discard(key)
+                s["collapsed_widgets"] = sorted(keys)
+                try:
+                    import pet_gravity
+                    pet_gravity.save_settings(s)
+                except Exception:
+                    pass
+            h0 = wrap.height()
+            wrap.set_collapsed(target)
+            h1 = self._wrap_height(wrap, wrap._widget, self._FIX_W, key)
+            self._start_row_fold(wrap, h0, h1)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    def _start_row_fold(self, wrap, h0, h1):
+        """组件行高度动画：和对话面板折叠用同一套口径（60fps + 两头慢的缓动）。
+
+        动画期间置 `_fold_locked`：气泡的定时刷新会走 `_relayout` 重建所有行，
+        正在动的那一行会被连根删掉（实测 RuntimeError: object has been deleted）。
+        对话面板的折叠本来就是这么挡的，这里沿用同一把锁。
+
+        锚点在动画开始时一次性取好（当前所在侧的外边缘），每帧直接摆几何，
+        整框不再走 `_start_settle` 的补位动画——否则行和框两段动画各跑各的，
+        框慢半拍、末尾补几像素，就是用户说的"最后弹一下"。
+        """
+        from bubble_ui import ANIM_MS, _dist_dur
+        self._fold_locked = True
+        side = self._current_side()
+        if side == "below":
+            anchor, mode = self.y(), "top"
+        else:
+            anchor, mode = self.y() + self.height(), "bottom"
+        self._rowfold = {"wrap": wrap, "h0": float(h0), "h1": float(h1),
+                         "t0": time.monotonic(), "dur": _dist_dur(h1 - h0),
+                         "anchor": anchor, "mode": mode, "fx": self.x()}
+        try:
+            self._mv_timer.stop()      # 位置缓动会和折叠几何互相拉扯
+        except Exception:
+            pass
+        if getattr(self, "_rowfold_timer", None) is None:
+            self._rowfold_timer = QTimer(self)
+            self._rowfold_timer.setTimerType(Qt.PreciseTimer)
+            self._rowfold_timer.timeout.connect(self._rowfold_tick)
+        self._rowfold_timer.start(ANIM_MS)
+        self._rowfold_tick()
+
+    def _rowfold_frame(self, a, h):
+        """把这一帧的行高摆进去，并同步整框几何（与对话折叠同一条路径）。"""
+        a["wrap"].setFixedHeight(max(10, int(round(h))))
+        total_w, full_h, col_hs, _cols = self._measure()
+        self._full_h = full_h
+        self._col_panels = [(i * self._FIX_W, 0, self._FIX_W, ch)
+                            for i, ch in enumerate(col_hs)]
+        self._fold_apply_geom(a["anchor"], a["mode"], a["fx"],
+                              total_w, full_h, col_hs)
+
+    def _rowfold_tick(self):
+        from bubble_ui import ease_in_out
+        a = getattr(self, "_rowfold", None)
+        if not a or not _w_is_alive(a["wrap"]):
+            if getattr(self, "_rowfold_timer", None) is not None:
+                self._rowfold_timer.stop()
+            self._rowfold = None
+            self._fold_locked = False
+            return
+        k = min(1.0, (time.monotonic() - a["t0"]) / max(0.01, a["dur"]))
+        self._rowfold_frame(a, a["h0"] + (a["h1"] - a["h0"]) * ease_in_out(k))
+        if k >= 1.0:
+            self._rowfold_timer.stop()
+            self._rowfold = None
+            self._rowfold_frame(a, a["h1"])   # 末帧精确落在目标上，不留零头
+            self._fold_locked = False
+            self._place()
+
+    def _measure(self, col_w=None):
+        """算出当前该多大：返回 (总宽, 总高, 每列高度, 每列的行)。
+
+        `_apply_size`（正常布局）和 `_fold_set_height`（折叠动画每帧）必须用
+        **同一套算法**——两边各算各的，动画结束时算出来的尺寸差那么几像素，
+        收尾时就会再补一次几何动画，看起来就是"最后弹一下"。
+        """
+        col_w = int(col_w or self._FIX_W)
+        m = self._vbox.contentsMargins()
+        gap = self._vbox.spacing()
+        pad = m.top() + m.bottom() + _kit_sc_b(4)
+        floor_h = self._HEAD_H + _kit_sc_b(8)
+        rows = [w for w in self._row_widgets if _w_is_alive(w)]
+        cols = self._split_columns(rows)
+        col_hs = []
+        for group in cols:
+            t = sum(self._row_h(w) for w in group) + max(0, len(group) - 1) * gap
+            col_hs.append(max(floor_h, t + pad))
+        if not col_hs:
+            col_hs = [floor_h]
+            cols = [[]]
+        return col_w * len(col_hs), max(col_hs), col_hs, cols
+
     def _apply_size(self, width):
         """按行高累加计算气泡尺寸并应用（含展开/收起动画与补位）。
 
         分列之后：高度取**最高的那一列**，宽度是列数 × 单列宽。
         """
         # 用 minimumHeight（=setFixedHeight 的权威值），sizeHint 在复用行时会返回过期缓存
-        m = self._vbox.contentsMargins()
-        gap = self._vbox.spacing()
         rows = [w for w in self._row_widgets if _w_is_alive(w)]
         cols = self._split_columns(rows)
         # 行高变了（比如展开了一个交互组件）可能导致分列结果变化——这里走的是
@@ -873,21 +1048,13 @@ class StatusBubbleLayout(StatusBubble):
         # 和实际摆放对不上。
         if self._groups_sig(cols) != getattr(self, "_col_groups", None):
             self._layout_rows(rows)
-            cols = self._split_columns(rows)
-        ncols = max(1, len(cols))
         col_w = int(width)
         for col in self._columns:
             col.setFixedWidth(col_w)           # 档位变了列宽也要跟着变
-        # 每列各自算自己的高度：多列时**不是一整块背景**，短的那列就该短一截，
-        # 不然第二列只放一个小模块时下面会拖着一大片空白。
-        pad = m.top() + m.bottom() + _kit_sc_b(4)
-        floor_h = self._HEAD_H + _kit_sc_b(8)
-        col_hs = []
-        for group in cols:
-            t = sum(self._row_h(w) for w in group) + max(0, len(group) - 1) * gap
-            col_hs.append(max(floor_h, t + pad))
-        full_h = max(col_hs) if col_hs else floor_h
-        width = col_w * ncols
+        # 尺寸一律走 _measure：折叠动画每帧用的是同一套算法，两边算出来必须
+        # 一模一样，否则动画收尾会再补一段几何动画（"最后弹一下"）
+        width, full_h, col_hs, cols = self._measure(col_w)
+        ncols = max(1, len(col_hs))
         self._ncols = ncols
         self._full_h = full_h
         # 每列一块背景板（画在 paintEvent 里）：紧贴排列，各自高度自适应
@@ -954,14 +1121,12 @@ class StatusBubbleLayout(StatusBubble):
                 if getattr(wrap, "_widget", None) is panel:
                     wrap.setFixedHeight(max(10, int(wh)))
                     break
-            total = 0
-            for wrap in self._row_widgets:
-                total += max(10, int(wrap.minimumHeight()))
-            total += max(0, len(self._row_widgets) - 1) * self._vbox.spacing()
-            m = self._vbox.contentsMargins()
-            full_h = max(self._HEAD_H + _kit_sc_b(8),
-                         total + m.top() + m.bottom() + _kit_sc_b(4))
+            # 用和正常布局完全同一套算法算尺寸（见 _measure 的说明），
+            # 否则动画结束时差几像素，收尾会再补一段几何动画 = "最后弹一下"
+            total_w, full_h, col_hs, _cols = self._measure()
             self._full_h = full_h
+            self._col_panels = [(i * self._FIX_W, 0, self._FIX_W, h)
+                                for i, h in enumerate(col_hs)]
             anchor = getattr(panel, "_fold_anchor", None)
             if anchor is None:
                 anchor = self.y() + self.height()
@@ -969,17 +1134,34 @@ class StatusBubbleLayout(StatusBubble):
             fx = getattr(panel, "_fold_x", None)
             if fx is None:
                 fx = self.x()
-            if mode == "top":
-                y = anchor
-            else:
-                y = anchor - full_h
-            # 先定窗口几何（锚点固定），再跟内容，避免内容先移动露出窗口外造成残影
-            self.setGeometry(fx, y, self._FIX_W, full_h)
-            self._content.setGeometry(0, 0, self._FIX_W, full_h)
-            self._content.update()
-            self.update()
+            self._fold_apply_geom(anchor, mode, fx, total_w, full_h, col_hs)
         except Exception:
             pass
+
+    def _fold_apply_geom(self, anchor, mode, fx, total_w, full_h, col_hs):
+        """折叠动画每帧的几何：窗口锚在一条不动的边上，只让另一边长短。
+
+        必须直接 setGeometry，**不能**走 `_apply_size` 的正常路径——那条路会把
+        整框尺寸交给 `_start_settle` 再做一段 0.16s 补位动画，于是行在动、框也在
+        动，两段动画各算各的时间，框永远慢半拍、结束时再补最后几像素，看着就是
+        "收完还弹一下"。对话面板的折叠一直是走这里，组件行折叠现在也走同一条。
+        """
+        if mode == "top":
+            y = anchor
+        else:
+            y = anchor - full_h
+        # 先定窗口几何（锚点固定），再跟内容，避免内容先移动露出窗口外造成残影
+        self.setGeometry(fx, y, total_w, full_h)
+        self._content.setGeometry(0, 0, total_w, full_h)
+        for i, col in enumerate(self._columns):
+            if i < len(col_hs):
+                col.setGeometry(i * self._FIX_W, 0, self._FIX_W, col_hs[i])
+            lay = col.layout()
+            if lay is not None:
+                lay.activate()
+        self._apply_col_mask(total_w, full_h)
+        self._content.update()
+        self.update()
 
     def _render_cache(self):
         """布局版无需位图缓存。"""
