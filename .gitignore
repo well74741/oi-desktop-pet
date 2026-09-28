@@ -4,7 +4,8 @@ build/
 build_out/
 dist/
 *.log
-pet_settings.json
+# 带 API Key，连同 .bak / 快照 / 事故备份一起排除（只写主文件名盖不住）
+pet_settings.json*
 chat_history.json
 chat_summary.json
 config.yaml
@@ -19,7 +20,7 @@ backups/
 counter_data.json
 oi_pet/
 
-# �û������ļ���������־û���
+# 用户数据文件（各模块的持久化）
 token_usage.json
 usage_data.json
 canvas_data.json
@@ -34,3 +35,7 @@ mytemplate_data.json
 
 # 打包产物（安装包/exe 不纳入版本库）
 *.exe
+
+# 以后新增模块的数据文件也一并排除，不用逐个补
+*_data.json
+snapshots/
