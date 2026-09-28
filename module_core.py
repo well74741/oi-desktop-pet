@@ -13,10 +13,15 @@ import time
 # 依此生成，不必再逐个文件改。
 # 编号规则：1.0 之前用两位小版本（0.9.03 -> 0.9.04 -> …），留足迭代空间；
 # 1.0 留给正式版。
-APP_VERSION = "0.9.15"
+APP_VERSION = "0.9.16"
 
 _CHAT_PANEL_UIS = {"chat"}
 _TITLE_LESS_WIDGET_UIS = {"canvas", "tokenmeter", "stats", "perler"}
+# 纯本地计算、没有任何 I/O 的源类型：算一次也就几微秒，不值得为它起线程，
+# 刷新间隔也不必和网络模块一样压到 5 秒起（时钟压到 5 秒就会慢半拍跳分钟）。
+_LOCAL_SOURCE_TYPES = {"clock", "static"}
+_LOCAL_MIN_INTERVAL = 1.0
+_MIN_INTERVAL = 5.0
 _MAX_BACKOFF = 300.0
 _BACKOFF_BASE = 5.0
 
@@ -54,6 +59,11 @@ class ModuleSpec:
     @property
     def is_action(self):
         return self.view.kind == "action"
+
+    @property
+    def is_local(self):
+        """纯本地计算、没有 I/O：可以直接在主线程算，不必起线程。"""
+        return str(self.source.get("type") or "") in _LOCAL_SOURCE_TYPES
 
 
 def _stable_id(name):
@@ -102,8 +112,10 @@ def module_spec(rule):
     """从单条规则构造运行期契约；输入通常已经过 normalize_rule。"""
     safe = normalize_rule(rule)
     source = safe.get("source", {})
+    stype = str(source.get("type") or "")
+    floor = _LOCAL_MIN_INTERVAL if stype in _LOCAL_SOURCE_TYPES else _MIN_INTERVAL
     try:
-        interval = max(5.0, float(safe.get("interval", 60) or 60))
+        interval = max(floor, float(safe.get("interval", 60) or 60))
     except (TypeError, ValueError):
         interval = 60.0
     name = str(safe.get("name") or safe.get("id") or "模块")

@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.15 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.16 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -166,6 +166,39 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.16：气泡分列 + 时钟走准 + 两处残留黄底 + 待机实测 2026-09-28】
+  - **气泡装不下就往旁边开一列**（用户明确要求：不限制展开的组件数量）。
+    `_content` 下面挂若干"列"容器，`_split_columns()` 按 `_max_col_h()`
+    （桌宠所在屏幕可用高度 − 余量）顺序贪心切分，模块顺序不变；宽度 =
+    列数 × 单列宽，高度取最高那一列。气泡本来就是以桌宠为中心摆、并夹在工作区
+    内，所以多出来的列自然向两边长。
+    踩到的两个坑都写进注释了：① 列的位置**自己 setGeometry**，不套 QHBoxLayout
+    ——气泡是隐藏状态下算好尺寸再显示的，嵌套布局那会儿还没跑，行会全挤在
+    同一个 y 上、拖拽命中全错；② 短的那一列要在末尾 `addStretch`，否则 Qt 把
+    余量平摊到各行之间，两列行距对不齐。
+    拖拽排序也跟着改成二维命中（`_row_rect()` 换算到 `_content` 坐标 +
+    x 方向加权），老代码只看 y，鼠标在第二列时会插到第一列同高度那行去。
+    回归：`test_bubble.py` 升到 76 项（14 行→2 列、22 行→3 列、行少了收回单列、
+    两列顶端对齐行距一致、跨列手柄精确命中、卡片中部不误触）。
+  - **时钟模块终于走得准**：`module_core` 原来把所有模块的间隔夹在 ≥5s，时钟
+    因此最多晚 5 秒才跳分钟（而模板说明写的是"每秒刷新"）。新增
+    `_LOCAL_SOURCE_TYPES = {clock, static}`：这类纯本地计算的间隔下限降到 1s，
+    并且**不再为它们起线程**（`spec.is_local` → 主线程直接算）。按秒刷新的
+    时钟原本会变成每秒一个线程，现在一个都不起。
+  - **两处残留的黄底提示**：`widgets/stats.py` / `tokenmeter.py` 的小时柱悬停
+    还在用 `showText(pos, text)`（不传控件 → 系统调色板 #ffffdc）。补上控件
+    参数，现在全项目的 `showText` 都传控件了。
+  - **待机性能：实测之后决定不动帧率**（用户要求保证显示效果）。
+    量出来的是：待机帧逻辑 0.035ms/帧、绘制 0.03ms/帧（倾斜时 0.13ms）、
+    整进程待机 **1.25% 单核** —— 已经没有值得冒险的空间。改的是另一处白烧：
+    GIF/WebP 播放器有自己的定时器，**桌宠隐藏时照样逐帧解码 + update() 一个
+    看不见的窗口**（原来只在 closeEvent 里停）。现在 `hideEvent/showEvent` 挂
+    `_set_anim_paused()`，用新增的 `_WebpAnim.set_paused()` 停在当前帧、
+    显示时接着放。可见时一帧不少，全屏游戏/托盘收起时才省——恰好是最需要
+    让出 CPU 的时候。
+  - **dist 自动清理**：新增 `_prune_dist.py`（每类只留最近 3 版 + 当前版，
+    `--dry` 可预览），打包脚本第 7 步自动调。这次清掉 30 个文件、606MB→141MB。
 
 - 【v0.9.15：开机自启 + 稳定性三件套（版本控制 / 数据快照 / 测试闸门）2026-09-28】
   - **开机自启**：新增 `autostart.py`（不依赖 Qt，便于单测），写当前用户的
@@ -1415,16 +1448,17 @@ PyInstaller 6.21（打包）。
 
 ```powershell
 python run_all_tests.py                           # 一键跑完所有套件（打包闸门用的也是它）
-python -u test_bubble.py                          # 气泡/模块契约/模块行几何回归测试（64 项）
+python -u test_bubble.py                          # 气泡/模块契约/模块行几何回归测试（76 项）
 python -u test_components_scale.py                 # 组件缩放回归测试
 python -u test_templates.py                        # 模块模板验证（111 项，新增模板必跑）
 python -u test_webchat.py                          # 聚合AI：站点/摆位/粘住网页窗口/切换不闪/输入法/打开入口（54 项）
-python -u test_pet_anim.py                         # 倾角动画 + 空菜单盘开合 + 提示排版 + 悬停提示（44 项）
+python -u test_pet_anim.py                         # 倾角动画 + 空盘开合 + 提示排版 + 悬停提示 + 动图暂停（50 项）
 python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性（14 项，沙箱隔离）
 python -u test_autostart.py                        # 开机自启读写与自愈（19 项，沙箱注册表键）
 python -u test_data_store.py                       # 原子写 + 每日滚动快照（13 项）
 python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（23 项，临时 profile，跑完即删）
 python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位
+python _prune_dist.py [--dry] [保留版本数]         # 清理 dist 历史产物（打包脚本已自动调）
 python _make_backup.py                            # 备份
 python _make_source.py                            # 导出开发源码包（不含用户数据）
 build.bat                                         # 打包：便携单文件 + 安装包（版本取自 APP_VERSION）

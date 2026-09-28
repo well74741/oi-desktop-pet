@@ -127,8 +127,11 @@ class _StatBar(QWidget):
             self._hover = h
             try:
                 from PyQt5.QtWidgets import QToolTip as _QT
+                # 第三个参数必须传控件：不传的话 QToolTip 用系统调色板
+                # ToolTipBase(#ffffdc)，就是那块黄底；传了才吃得到本窗口的
+                # 深色 QToolTip 样式（和「模块列表」标题那次是同一个坑）
                 _QT.showText(self.mapToGlobal(QPoint(e.x() + 8, 2)),
-                             self._hover_tip())
+                             self._hover_tip(), self)
             except Exception:
                 pass
         super().mouseMoveEvent(e)

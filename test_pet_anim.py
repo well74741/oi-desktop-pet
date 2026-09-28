@@ -305,6 +305,40 @@ check("提示：宽松的位置仍然用横排（不要动不动就竖排）",
 pet_w.close()
 app.processEvents()
 
+# ---------- 11. 看不见的时候别烧 CPU：动图跟着可见性暂停 ----------
+# 帧循环隐藏时已经降到 5fps，但 GIF/WebP 播放器有自己的定时器，隐藏期间照样
+# 逐帧解码 + update() 一个看不见的窗口。只在不可见时暂停，可见时一帧不少。
+src_pg = open(os.path.join(HERE, "pet_gravity.py"), encoding="utf-8").read()
+check("动图：隐藏时暂停、显示时恢复（挂在 hideEvent/showEvent 上）",
+      "def hideEvent" in src_pg and "_set_anim_paused(True)" in src_pg
+      and "_set_anim_paused(False)" in src_pg)
+check("动图：暂停用的是 set_paused，不是 stop（stop 会丢当前帧位置）",
+      "def set_paused" in src_pg
+      and "_webp_anim.set_paused" in src_pg)
+pet_v = G.GravityPet({})
+pet_v.move(-7000, -7000)
+pet_v.show()
+app.processEvents()
+anim = pet_v._webp_anim
+if anim is not None and len(getattr(anim, "_frames", [])) > 1:
+    check("动图：显示时在播", anim._timer.isActive())
+    pet_v.hide()
+    app.processEvents()
+    check("动图：隐藏时停掉了定时器（看不见就不解码）", not anim._timer.isActive())
+    _idx = anim._idx
+    time.sleep(0.25)
+    app.processEvents()
+    check("动图：暂停期间帧号不推进", anim._idx == _idx)
+    pet_v.show()
+    app.processEvents()
+    check("动图：重新显示立刻恢复，且从当前帧接着放",
+          anim._timer.isActive() and anim._idx == _idx)
+else:
+    # 默认桌宠图是多帧 webp；万一换成静态图，这几条就没得测
+    check("动图：当前桌宠图不是多帧动图，跳过播放相关断言", True)
+pet_v.close()
+app.processEvents()
+
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:
     print("失败项：" + "、".join(FAIL))

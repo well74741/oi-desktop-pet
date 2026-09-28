@@ -2570,12 +2570,25 @@ class StatusBubble(QWidget):
                 if (p.name not in self._pending_rules
                         and p.name not in self._chat_pending
                         and not getattr(p, "_hung", False)):
-                    self._pending_rules.add(p.name)
-                    if self._spawn_rule_thread(p):
+                    if spec.is_local:
+                        # 时钟/静态文本这类纯本地计算：直接算，不起线程。
+                        # 起线程 + 跨线程投递的开销比这点计算大得多；时钟按秒
+                        # 刷新时更是每秒一个线程，纯属浪费。
                         self._module_scheduler.started(p.name)
+                        try:
+                            self._last[p.name] = (now, p.collect())
+                            failed = False
+                        except Exception:
+                            self._last[p.name] = (now, "—")
+                            failed = True
+                        self._module_scheduler.finish(p.name, failed, now)
                     else:
-                        # 没有空闲线程槽位：下个 tick 自动重试
-                        self._pending_rules.discard(p.name)
+                        self._pending_rules.add(p.name)
+                        if self._spawn_rule_thread(p):
+                            self._module_scheduler.started(p.name)
+                        else:
+                            # 没有空闲线程槽位：下个 tick 自动重试
+                            self._pending_rules.discard(p.name)
             e2 = self._last.get(p.name)
             if not p.rule.get("embed", True):
                 # 未勾选"嵌入气泡"：不显示行，但继续后台取数供自动弹出

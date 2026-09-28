@@ -18,7 +18,7 @@ if not exist "%PYENV%" (
     exit /b 1
 )
 
-echo [1/6] Running test suites (gate)...
+echo [1/7] Running test suites (gate)...
 if defined OI_SKIP_TESTS (
     echo         skipped by OI_SKIP_TESTS
 ) else (
@@ -29,7 +29,7 @@ if defined OI_SKIP_TESTS (
     )
 )
 
-echo [2/6] Reading version and writing version_info.txt...
+echo [2/7] Reading version and writing version_info.txt...
 for /f %%v in ('"%PYENV%" _make_version.py') do set "VER=%%v"
 if not defined VER (
     echo Failed to read APP_VERSION.
@@ -37,33 +37,36 @@ if not defined VER (
 )
 echo         version = %VER%
 
-echo [3/6] Building portable single-file exe...
+echo [3/7] Building portable single-file exe...
 set "OI_ONEDIR="
 "%PYENV%" -m PyInstaller --noconfirm --clean --distpath build_out --workpath build oi_pet_v020.spec
 if errorlevel 1 exit /b 1
 if not exist dist mkdir dist
 move /Y "build_out\oi桌宠.exe" "dist\oi桌宠%VER%.exe" >nul
 
-echo [4/6] Building folder build for the installer...
+echo [4/7] Building folder build for the installer...
 set "OI_ONEDIR=1"
 "%PYENV%" -m PyInstaller --noconfirm --clean --distpath build_out --workpath build oi_pet_v020.spec
 if errorlevel 1 exit /b 1
 set "OI_ONEDIR="
 
-echo [5/6] Refreshing runtime data next to the portable exe...
+echo [5/7] Refreshing runtime data next to the portable exe...
 copy /Y config.yaml dist\config.yaml >nul
 copy /Y webchat_sites.json dist\webchat_sites.json >nul
 if exist dist\widgets rmdir /S /Q dist\widgets
 xcopy /E /I /Y widgets dist\widgets >nul
 if exist dist\widgets\__pycache__ rmdir /S /Q dist\widgets\__pycache__
 
-echo [6/6] Building installer...
+echo [6/7] Building installer...
 if not exist "%ISCC%" (
     echo [WARN] Inno Setup not found; skipped installer.
     goto done
 )
 "%ISCC%" /DMyAppVersion=%VER% "oi桌宠.iss"
 if errorlevel 1 exit /b 1
+
+echo [7/7] Pruning old artifacts in dist (keep latest 3 + current)...
+"%PYENV%" _prune_dist.py
 
 :done
 echo.

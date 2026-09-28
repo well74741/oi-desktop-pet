@@ -489,6 +489,49 @@ app.processEvents()
 check("输入框：一行时不会白占两行的高度", _ep.input.height() > _one)
 _ep.close()
 
+# ---------- 气泡分列：一列装不下就往旁边开一列 ----------
+# 用户的 15 个模块全收起就接近 1080p 的可用高度，再展开两三个交互组件就会长到
+# 屏幕外面去——长出去的部分既看不见也点不到。现在超高就新开一列，气泡整体以
+# 桌宠为中心摆放，多出来的列自然向两边长。
+from PyQt5.QtCore import QPoint as _QPt                           # noqa: E402
+
+_cb = StatusBubbleLayout(FakePet2())
+_cb._max_col_h = lambda: 260          # 真实值是屏幕可用高度，这里压小逼出分列
+_cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(14)]
+_cb._relayout()
+app.processEvents()
+_r = [_cb._row_rect(w) for w in _cb._row_widgets]
+check("分列：装不下时开了第二列", _cb._ncols == 2)
+check("分列：高度压在上限内（不会长到屏幕外）", _cb._full_h <= 260)
+check("分列：宽度 = 列数 × 单列宽", _cb.width() == _cb._FIX_W * _cb._ncols)
+check("分列：每一行都在气泡框内",
+      all(0 <= r.left() and r.right() <= _cb.width()
+          and 0 <= r.top() and r.bottom() <= _cb._full_h for r in _r))
+check("分列：行互不重叠", len({(r.left(), r.top()) for r in _r}) == len(_r))
+_c1 = [r for r in _r if r.left() < _cb._FIX_W]
+_c2 = [r for r in _r if r.left() >= _cb._FIX_W]
+check("分列：两列都有行，且第二列在右边", len(_c1) > 0 and len(_c2) > 0)
+check("分列：两列顶端对齐、行距一致（短的那列把余量丢到底部）",
+      _c1[0].top() == _c2[0].top()
+      and (_c1[1].top() - _c1[0].top()) == (_c2[1].top() - _c2[0].top()))
+check("分列：模块顺序不变（分列只换行不换序）",
+      [w._ridx for w in _cb._row_widgets] == list(range(len(_cb._row_widgets))))
+# 拖拽命中：第二列的行也要点得到（老代码只看 y，会点中第一列同高度那行）
+check("分列：每一行的手柄都能精确命中（跨列也对）",
+      all(_cb._handle_hit(_QPt(r.left() + 2, r.center().y())) is w
+          for w, r in zip(_cb._row_widgets, _r)))
+check("分列：点在卡片中部不会误触发拖拽",
+      all(_cb._handle_hit(_QPt(r.center().x(), r.center().y())) is None for r in _r))
+_cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(22)]
+_cb._relayout()
+app.processEvents()
+check("分列：更多行就开第三列", _cb._ncols == 3 and _cb._full_h <= 260)
+_cb._disp_rows = [("模块%d" % i, "值%d" % i, None) for i in range(4)]
+_cb._relayout()
+app.processEvents()
+check("分列：行变少会收回单列", _cb._ncols == 1 and _cb.width() == _cb._FIX_W)
+_cb.close()
+
 # ---------- 汇总 ----------
 print("\n==== %d passed, %d failed ====" % (len(PASS), len(FAIL)))
 if FAIL:

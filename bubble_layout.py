@@ -13,7 +13,7 @@ StatusBubble 的旧手绘呈现已退役（不可达）。此版本与基类共�
 import html
 import time
 
-from PyQt5.QtCore import Qt, QRect, QSize
+from PyQt5.QtCore import Qt, QPoint, QRect, QSize
 from PyQt5.QtGui import (QColor, QFont, QFontMetrics, QPainter, QPen,
                          QContextMenuEvent)
 from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QPushButton, QSizePolicy,
@@ -472,17 +472,16 @@ class StatusBubbleLayout(StatusBubble):
         super().__init__(pet_widget)
         self._content = QWidget(self)
         self._content.setAttribute(Qt.WA_TranslucentBackground, True)
-        self._vbox = QVBoxLayout(self._content)
-        # 右外边距 = 左外边距 + 手柄槽，使卡片左右留白相等、整体居中；顶部边距收小
+        # 行按列摆：一列装不下（超出屏幕可用高度）就往旁边再开一列。气泡整体
+        # 以桌宠为中心摆放，所以多出来的列自然是向两边长，不会顶出屏幕。
+        # 列的位置**自己 setGeometry**，不套横向布局：气泡是隐藏状态下算好尺寸
+        # 再显示的，嵌套布局在隐藏窗口上不会及时跑，行会全挤在一起。
+        self._columns = []           # 列容器控件（第 0 列的布局就是 self._vbox）
         from widgets import kit
         self._out_m = kit.bubble_token("outer_margin")
         self._handle_w = kit.bubble_token("handle_width")
-        self._vbox.setContentsMargins(self._out_m,
-                                      max(0, self._HEAD_H - _kit_sc_b(3)),
-                                      self._out_m + self._handle_w,
-                                      _kit_sc_b(2))
-        self._vbox.setSpacing(_kit_sc_b(1))
-        self._row_widgets = []       # 当前布局中的行控件（按显示顺序）
+        self._vbox = self._new_column()
+        self._row_widgets = []       # 当前布局中的行控件（按显示顺序，跨列连续）
         self._wrap_cache = {}        # 规则 id -> 交互组件包装行（复用）
         self._scroll_rows = []       # 滚动字幕行
         self._drag2 = None           # 布局版拖拽状态
@@ -512,6 +511,109 @@ class StatusBubbleLayout(StatusBubble):
         self._op_slider.raise_()
         self._content.show()
         self._maybe_ui_timer()
+
+    # ---------- 分列 ----------
+    def _new_column(self):
+        """新开一列，返回它的竖向布局。
+
+        每列的内外边距和原来单列时一模一样（右边距 = 左边距 + 手柄槽，让卡片
+        左右留白相等），所以列与列之间自带一条均匀的空隙，不用额外 spacing。
+        """
+        col = QWidget(self._content)
+        col.setAttribute(Qt.WA_TranslucentBackground, True)
+        # 每列固定单列宽：横向布局按 sizeHint 分配空间，不定宽的话行会被压扁
+        col.setFixedWidth(int(getattr(self, "_FIX_W", 200)))
+        v = QVBoxLayout(col)
+        v.setContentsMargins(self._out_m,
+                             max(0, self._HEAD_H - _kit_sc_b(3)),
+                             self._out_m + self._handle_w,
+                             _kit_sc_b(2))
+        v.setSpacing(_kit_sc_b(1))
+        col.show()
+        self._columns.append(col)
+        return v
+
+    def _col_layout(self, i):
+        while len(self._columns) <= i:
+            self._new_column()
+        return self._columns[i].layout()
+
+    def _max_col_h(self):
+        """一列最多多高：桌宠所在屏幕的可用高度留一点余量。
+
+        超过就新开一列——宁可横着长，也不要竖着长到屏幕外面去（长出去的部分
+        既看不见也点不到）。
+        """
+        try:
+            from PyQt5.QtWidgets import QApplication
+            scr = QApplication.screenAt(
+                self.pet.mapToGlobal(self.pet.rect().center())) \
+                or QApplication.primaryScreen()
+            return max(_kit_sc_b(160), scr.availableGeometry().height() - _kit_sc_b(28))
+        except Exception:
+            return 10 ** 6          # 取不到屏幕信息就别分列
+
+    def _row_h(self, w):
+        """行的权威高度：sizeHint 在复用行上会给过期缓存，用 minimumHeight。"""
+        return max(10, int(w.minimumHeight()))
+
+    def _split_columns(self, wraps):
+        """把行按顺序切成若干列，每列不超过 _max_col_h()。返回 [[行, ...], ...]。
+
+        贪心按顺序装：模块的相对顺序保持不变（用户拖拽排的序不能被打乱），
+        装不下就开下一列。单行本身就超高（比如展开的大组件）时它独占一列。
+        """
+        limit = self._max_col_h()
+        m = self._vbox.contentsMargins()
+        pad = m.top() + m.bottom() + _kit_sc_b(4)
+        gap = self._vbox.spacing()
+        cols, cur, cur_h = [], [], pad
+        for w in wraps:
+            h = self._row_h(w)
+            if cur and cur_h + gap + h > limit:
+                cols.append(cur)
+                cur, cur_h = [], pad
+            cur_h += h + (gap if cur else 0)
+            cur.append(w)
+        if cur or not cols:
+            cols.append(cur)
+        return cols
+
+    def _groups_sig(self, groups):
+        return [[id(w) for w in g] for g in groups]
+
+    def _layout_rows(self, wraps):
+        """按需分列后把行摆进各列；多余的空列收起来。"""
+        for col in self._columns:
+            lay = col.layout()
+            while lay.count():
+                item = lay.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.setParent(None)
+        groups = self._split_columns(wraps)
+        for i, group in enumerate(groups):
+            lay = self._col_layout(i)
+            for wrap in group:
+                wrap.setParent(self._columns[i])
+                lay.addWidget(wrap)
+                wrap.show()   # setParent 会隐式隐藏，必须重新显示
+            # 末尾加弹簧：短的那一列剩下的空间要全丢到底部，否则 Qt 会把它
+            # 平摊到各行之间，同一个气泡里两列的行距对不齐
+            lay.addStretch(1)
+            self._columns[i].show()
+        for i in range(len(groups), len(self._columns)):
+            self._columns[i].hide()
+        self._col_groups = self._groups_sig(groups)
+        return len(groups)
+
+    def _row_rect(self, w):
+        """行在 _content 坐标系里的矩形。
+
+        分列之后行的父控件是"列"，`geometry()` 是列内坐标，拖拽命中和插入线
+        都得换算到 _content 上来，否则第二列的行永远点不中。
+        """
+        return QRect(w.mapTo(self._content, QPoint(0, 0)), w.size())
 
     def _on_bubble_opacity(self, v):
         try:
@@ -627,16 +729,8 @@ class StatusBubbleLayout(StatusBubble):
                     self._scroll_rows.append(row.value)
                 row._ridx = len(new_wraps)
                 new_wraps.append(row)
-            # 按新顺序重排布局
-            while self._vbox.count():
-                item = self._vbox.takeAt(0)
-                w = item.widget()
-                if w is not None:
-                    w.setParent(None)
-            for wrap in new_wraps:
-                wrap.setParent(self._content)
-                self._vbox.addWidget(wrap)
-                wrap.show()   # setParent 会隐式隐藏，必须重新显示
+            # 按新顺序重排布局（装不下就分列）
+            self._layout_rows(new_wraps)
             # 删除不再使用的包装行
             for key, wrap in list(self._wrap_cache.items()):
                 if key not in used_cache:
@@ -717,18 +811,48 @@ class StatusBubbleLayout(StatusBubble):
             traceback.print_exc()
 
     def _apply_size(self, width):
-        """按行高累加计算气泡高度并应用（含展开/收起动画与补位）。"""
+        """按行高累加计算气泡尺寸并应用（含展开/收起动画与补位）。
+
+        分列之后：高度取**最高的那一列**，宽度是列数 × 单列宽。
+        """
         # 用 minimumHeight（=setFixedHeight 的权威值），sizeHint 在复用行时会返回过期缓存
-        total = 0
-        for wrap in self._row_widgets:
-            total += max(10, int(wrap.minimumHeight()))
-        total += max(0, len(self._row_widgets) - 1) * self._vbox.spacing()
         m = self._vbox.contentsMargins()
+        gap = self._vbox.spacing()
+        rows = [w for w in self._row_widgets if _w_is_alive(w)]
+        cols = self._split_columns(rows)
+        # 行高变了（比如展开了一个交互组件）可能导致分列结果变化——这里走的是
+        # 原地更新路径，没有重排过，发现不一致就补一次重排，否则算出来的尺寸
+        # 和实际摆放对不上。
+        if self._groups_sig(cols) != getattr(self, "_col_groups", None):
+            self._layout_rows(rows)
+            cols = self._split_columns(rows)
+        ncols = max(1, len(cols))
+        for col in self._columns:
+            col.setFixedWidth(int(width))      # 档位变了列宽也要跟着变
+        tallest = 0
+        for group in cols:
+            t = sum(self._row_h(w) for w in group) + max(0, len(group) - 1) * gap
+            tallest = max(tallest, t)
         full_h = max(self._HEAD_H + _kit_sc_b(8),
-                     total + m.top() + m.bottom() + _kit_sc_b(4))
+                     tallest + m.top() + m.bottom() + _kit_sc_b(4))
+        width = int(width) * ncols
+        self._ncols = ncols
         self._full_h = full_h
         self.setFixedWidth(width)
         self._content.setGeometry(0, 0, width, full_h)
+        # 列自己摆位 + 立刻跑一次列内布局：气泡是隐藏着算好尺寸再显示的，
+        # 靠 Qt 自己调度的话这两步要等到显示之后才发生，其间行的坐标全是错的
+        # （拖拽命中会点错行，同一列的行还会挤在同一个 y 上）。
+        col_w = int(width // ncols)
+        for i, col in enumerate(self._columns):
+            if i < ncols:
+                col.setGeometry(i * col_w, 0, col_w, full_h)
+                col.show()
+            else:
+                col.hide()
+            lay = col.layout()
+            if lay is not None:
+                lay.activate()
         # 右上角悬浮控件定位：钉住 / 关闭 / 透明度滑块，尺寸与间距随气泡档位一起缩放，
         # 否则按钮放大后仍按固定偏移会重叠错位。
         _btn_w = _kit_sc_b(16)
@@ -895,10 +1019,12 @@ class StatusBubbleLayout(StatusBubble):
     # ---------- 布局版拖拽排序 ----------
 
     def _handle_hit(self, pos):
-        if pos.x() >= self._out_m + self._handle_w:
-            return None
+        """点在某一行的手柄上吗（分列之后要按行自己的左边缘算，不能用固定 x）。"""
         for wrap in self._row_widgets:
-            if _w_is_alive(wrap) and wrap.geometry().contains(pos):
+            if not _w_is_alive(wrap):
+                continue
+            r = self._row_rect(wrap)
+            if r.contains(pos) and (pos.x() - r.left()) <= self._handle_w + 2:
                 return wrap
         return None
 
@@ -924,7 +1050,7 @@ class StatusBubbleLayout(StatusBubble):
             if wrap is not None:
                 self._drag2 = {"widget": wrap,
                                "src": getattr(wrap, "_ridx", 0),
-                               "mouse": event.pos().y()}
+                               "mouse": event.pos()}
                 if getattr(wrap, "_card", None) is not None:
                     wrap._card._dragging = True   # 高亮被拖拽的卡片（行不脱离布局）
                     wrap._card.update()
@@ -956,7 +1082,7 @@ class StatusBubbleLayout(StatusBubble):
             return
         d = self._drag2
         if d is not None:
-            d["mouse"] = event.pos().y()
+            d["mouse"] = event.pos()
             self._place_insert_line()
             event.accept()
             return
@@ -991,52 +1117,45 @@ class StatusBubbleLayout(StatusBubble):
         super().mouseReleaseEvent(event)
 
     def _place_insert_line(self):
-        """根据鼠标位置计算插入目标，并显示高亮线。"""
+        """根据鼠标位置计算插入目标，并显示高亮线。
+
+        分列之后必须按**二维距离**找目标行：只看 y 的话，鼠标在第二列时会命中
+        第一列同高度的那一行，插到完全不相干的位置去。
+        """
         try:
             d = self._drag2
             if d is None:
                 return
-            my = d["mouse"]
+            mp = d["mouse"]
             src = d["src"]
             rows = [w for w in self._row_widgets if _w_is_alive(w)]
             target = -1
+            best_d = None
             for i, w in enumerate(rows):
-                g = w.geometry()
-                if g.top() <= my < g.bottom():
+                g = self._row_rect(w)
+                if g.contains(mp):
                     target = i
                     break
+                c = g.center()
+                # 水平方向加权：跨列的行要明显"更远"，免得贴着列缝时来回跳
+                dd = abs(mp.y() - c.y()) + abs(mp.x() - c.x()) * 2
+                if best_d is None or dd < best_d:
+                    best_d, target = dd, i
             if target < 0:
-                if rows:
-                    first = rows[0].geometry()
-                    last = rows[-1].geometry()
-                    if my < first.center().y():
-                        target = 0
-                    elif my >= last.center().y():
-                        target = len(rows) - 1
-                    else:
-                        best = 0
-                        best_d = abs(my - first.center().y())
-                        for i, w in enumerate(rows):
-                            dd = abs(my - w.geometry().center().y())
-                            if dd < best_d:
-                                best_d = dd
-                                best = i
-                        target = best
-                else:
-                    target = 0
+                target = 0
             line = self._make_insert_line()
-            if target == src:
+            if not rows or target == src:
                 # 没有移动：不显示插入线
                 line.hide()
                 d["dst"] = src
                 self.update()
                 return
-            g = rows[target].geometry()
+            g = self._row_rect(rows[target])
             # 向下拖：缝隙在目标行下方；向上拖：缝隙在目标行上方
             y = g.bottom() + 1 if target > src else g.top() - 2
-            card_x = self._out_m + self._handle_w
-            card_w = self._FIX_W - 2 * (self._out_m + self._handle_w)
-            line.setGeometry(card_x, int(y), card_w, 4)
+            card_x = g.left() + self._handle_w
+            card_w = max(10, g.width() - self._handle_w)
+            line.setGeometry(int(card_x), int(y), int(card_w), 4)
             line.show()
             line.raise_()
             d["dst"] = target

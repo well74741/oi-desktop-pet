@@ -1063,6 +1063,20 @@ class _WebpAnim(QObject):
     def stop(self):
         self._timer.stop()
 
+    def set_paused(self, paused):
+        """暂停 / 恢复播放（停在当前帧，不回到第一帧）。
+
+        桌宠被隐藏（全屏应用遮挡、托盘收起）时用：看不见还在逐帧解码是纯浪费。
+        恢复时按当前帧自己的时长接着走，不会因为暂停过而变速。
+        """
+        if not self._frames or len(self._frames) <= 1:
+            return
+        if paused:
+            self._timer.stop()
+        elif not self._timer.isActive():
+            i = self._idx % len(self._durations)
+            self._timer.start(max(30, self._durations[i]))
+
     def current_pixmap(self):
         if not self._frames:
             return QPixmap()
@@ -7916,6 +7930,33 @@ class GravityPet(QWidget):
         except Exception:
             pass
         super().hide()
+
+    def _set_anim_paused(self, paused):
+        """桌宠看不见的时候把动图暂停。
+
+        帧循环隐藏时已经降到 5fps，但 GIF/WebP 播放器有**自己的定时器**，
+        隐藏期间照样逐帧解码 + update() 一个看不见的窗口——纯烧 CPU。
+        只在不可见时暂停、可见时立刻恢复，所以对观感零影响（能看见的时候
+        一帧都不少）。
+        """
+        try:
+            if self._gif_movie is not None:
+                self._gif_movie.setPaused(bool(paused))
+        except Exception:
+            pass
+        try:
+            if self._webp_anim is not None:
+                self._webp_anim.set_paused(bool(paused))
+        except Exception:
+            pass
+
+    def hideEvent(self, event):
+        self._set_anim_paused(True)
+        super().hideEvent(event)
+
+    def showEvent(self, event):
+        self._set_anim_paused(False)
+        super().showEvent(event)
 
     def closeEvent(self, event):
         self.frame_timer.stop()
