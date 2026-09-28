@@ -20,6 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt5.QtCore import QPoint                          # noqa: E402
+from PyQt5.QtGui import QFontMetrics                      # noqa: E402
 from PyQt5.QtWidgets import QApplication, QVBoxLayout, QWidget   # noqa: E402
 
 app = QApplication([])
@@ -141,6 +142,67 @@ for sc in SCALES:
           not bad_fit, "；".join(bad_fit[:3]))
     check("组件行(%s)：气泡给的高度预算不会把组件压扁" % tag, not bad_h,
           "；".join(bad_h[:3]))
+
+kit.set_bubble_scale(1.0)
+
+# ---------- 标题装不下时滚动，而不是被裁掉半个字 ----------
+# 模块行标题是固定 44px 列（各模块要对齐），"Token 消耗"会被裁成"Token 消"。
+# 三个档位都要么放得下、要么滚动，不能出现"裁一半"。
+_hosts = []
+for sc in SCALES:
+    kit.set_bubble_scale(sc)
+    _long = kit.title7("Token 消耗")
+    _short = kit.title7("CPU")
+    _h = QWidget()
+    _l = QVBoxLayout(_h)
+    _l.setContentsMargins(0, 0, 0, 0)
+    _l.addWidget(_long)
+    _l.addWidget(_short)
+    _h.resize(kit.bs(210), kit.row_height() * 2 + 8)
+    _h.show()
+    app.processEvents()
+    _hosts.append(_h)
+    _tw = QFontMetrics(_long.font()).horizontalAdvance("Token 消耗")
+    check("滚动标题(x%s)：装不下的长标题会滚动（列 %d < 文字 %d）"
+          % (sc, _long.width(), _tw),
+          _long.needs_scroll() if _tw > _long.width() else True)
+    check("滚动标题(x%s)：放得下的短标题不滚（不必要的动效不做）" % sc,
+          not _short.needs_scroll())
+    check("滚动标题(x%s)：滚动标题不改变行的高度预算" % sc,
+          _long.height() == _short.height() == kit.row_height())
+
+# 待机开销：没有任何可见的滚动标题时，共享定时器必须停下来
+for _h in _hosts:
+    _h.hide()
+app.processEvents()
+kit.ScrollLabel._tick_all()
+check("滚动标题：全部隐藏后共享定时器自动停（不白占待机 CPU）",
+      kit.ScrollLabel._timer is None or not kit.ScrollLabel._timer.isActive())
+
+# 登记表必须是弱引用：气泡每次刷新都重建模块行，存强引用等于把历来所有标题
+# 标签都留住（内存只涨不降）。而且**不能**加 __del__ —— 在 Qt 析构期回调
+# Python 代码会踩已释放的 C++ 对象，打包用的 Python 3.12 环境实测直接 segfault，
+# 是打包闸门拦下来的。
+import gc                                                  # noqa: E402
+import weakref                                             # noqa: E402
+
+check("滚动标题：登记表存的是弱引用，不是控件本身",
+      all(isinstance(r, weakref.ref) for r in kit.ScrollLabel._live))
+check("滚动标题：没有 __del__（Qt 析构期回调 Python 会 segfault）",
+      "__del__" not in kit.ScrollLabel.__dict__)
+_before = len(kit.ScrollLabel._live)
+_tmp_host = QWidget()
+_tmp_lay = QVBoxLayout(_tmp_host)
+for _i in range(30):
+    _tmp_lay.addWidget(kit.title7("临时标题 %d" % _i))
+_tmp_host.deleteLater()
+del _tmp_host, _tmp_lay
+app.processEvents()
+gc.collect()
+kit.ScrollLabel._tick_all()          # 这一轮会把死掉的条目清出去
+check("滚动标题：控件销毁后登记表会自己收缩（不是只涨不降，%d -> %d）"
+      % (_before + 30, len(kit.ScrollLabel._live)),
+      len(kit.ScrollLabel._live) <= _before + 30)
 
 kit.set_bubble_scale(1.0)
 

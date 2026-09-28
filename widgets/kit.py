@@ -20,7 +20,7 @@
   不要给根控件 setFixedHeight（除非你想锁死高度）。
 """
 
-from PyQt5.QtCore import Qt, QPointF, QSize
+from PyQt5.QtCore import Qt, QPointF, QRect, QSize
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt5.QtWidgets import (QAbstractButton, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
                              QLabel, QLayout,
@@ -377,17 +377,140 @@ def scroll(body, max_h=120):
 _TITLE7_W = 44   # 模块行标题固定列宽（与其他模块对齐）
 
 
+class ScrollLabel(QLabel):
+    """标题标签：装不下就横向滚动，而不是被裁掉半个字。
+
+    模块行标题是固定 44px 列（各模块要对齐），"Token 消耗"这类长标题就会被
+    裁成"Token 消"。这里保持 QLabel 的完整 API（setText/text/setToolTip 都照旧），
+    只在放不下时改成滚动字幕。
+
+    所有实例共用一个类级定时器：单个标签各起一个 QTimer 会让待机白白多出
+    几十次/秒的唤醒；这里只在"确实有标签需要滚"时才跑。
+    """
+
+    _SPEED = 34.0        # px/s，比气泡值区慢一些，标题不抢注意力
+    _GAP = 18            # 一轮结束到下一轮开始的空白
+    _PAUSE = 1.2         # 每轮开头停顿几秒，方便看清开头
+    _timer = None
+    _live = []           # 存的是 weakref，不是控件本身（见下）
+
+    def __init__(self, text="", parent=None):
+        super().__init__(str(text), parent)
+        self._off = 0.0
+        self._t_last = None
+        self._color = "#96a7c4"      # 滚动时手绘用；样式表的颜色取不到
+        # 必须用弱引用：气泡每次刷新都会重建模块行，强引用会把历来所有标题标签
+        # 全留住（内存只涨不降）。也**不能**写 __del__ —— 在 Qt 析构期回调
+        # Python 代码会踩到已经释放的 C++ 对象，实测直接 segfault。
+        import weakref
+        ScrollLabel._live.append(weakref.ref(self))
+
+    def set_color(self, color):
+        self._color = str(color)
+
+    # ---- 是否需要滚 ----
+    def _text_w(self):
+        return QFontMetrics(self.font()).horizontalAdvance(self.text())
+
+    def needs_scroll(self):
+        return self._text_w() > self.width() + 1
+
+    # ---- 共享定时器 ----
+    @classmethod
+    def _ensure_timer(cls):
+        if cls._timer is not None:
+            return
+        from PyQt5.QtCore import QTimer
+        cls._timer = QTimer()
+        cls._timer.setInterval(33)          # 30fps，字幕足够顺
+        cls._timer.timeout.connect(cls._tick_all)
+
+    @classmethod
+    def _tick_all(cls):
+        import time as _t
+        now = _t.monotonic()
+        alive, active = [], 0
+        for ref in cls._live:
+            w = ref()
+            if w is None:
+                continue                    # Python 对象已回收
+            try:
+                visible = w.isVisible()     # C++ 对象已析构的话在这里抛
+            except RuntimeError:
+                continue
+            alive.append(ref)
+            if visible and w.needs_scroll():
+                active += 1
+                w._advance(now)
+            else:
+                w._off = 0.0
+                w._t_last = None
+        cls._live = alive
+        if not active and cls._timer is not None:
+            cls._timer.stop()
+
+    def _advance(self, now):
+        if self._t_last is None:
+            self._t_last = now
+            return
+        dt = max(0.0, min(0.2, now - self._t_last))
+        self._t_last = now
+        span = self._text_w() + bs(self._GAP)
+        # 开头停顿：把 _off 停在 0 附近一会儿
+        self._off += self._SPEED * bubble_k() * dt
+        if self._off > span:
+            self._off = -self._PAUSE * self._SPEED * bubble_k()
+        self.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.needs_scroll():
+            ScrollLabel._ensure_timer()
+            if not ScrollLabel._timer.isActive():
+                ScrollLabel._timer.start()
+
+    def setText(self, text):
+        super().setText(text)
+        self._off = 0.0
+        self._t_last = None
+        if self.isVisible() and self.needs_scroll():
+            ScrollLabel._ensure_timer()
+            if not ScrollLabel._timer.isActive():
+                ScrollLabel._timer.start()
+
+    def paintEvent(self, event):
+        if not self.needs_scroll():
+            super().paintEvent(event)       # 放得下就走 QLabel 原生绘制
+            return
+        p = QPainter(self)
+        p.setFont(self.font())
+        p.setPen(QColor(self._color))
+        p.setClipRect(self.rect())
+        tw = self._text_w()
+        span = tw + bs(self._GAP)
+        x = -max(0.0, self._off)
+        r = QRect(int(x), 0, tw, self.height())
+        p.drawText(r, Qt.AlignLeft | Qt.AlignVCenter, self.text())
+        # 第二份跟在后面，滚到尾时无缝接上
+        p.drawText(QRect(int(x + span), 0, tw, self.height()),
+                   Qt.AlignLeft | Qt.AlignVCenter, self.text())
+        p.end()
+
+
+
 def title7(text="", color="#96a7c4"):
     """模块行小标题：7.5pt 不加粗、固定 44px 列、左对齐垂直居中。
     与天气/聚合AI 等所有模块行标题一致（避免字号/对齐偏差）。
-    字号/列宽按气泡档位（bubble_scale）缩放。"""
-    l = QLabel(str(text))
+    字号/列宽按气泡档位（bubble_scale）缩放。
+    标题比这一列宽时改为横向滚动（"Token 消耗"以前会被裁成"Token 消"）。"""
+    l = ScrollLabel(str(text))
     f = QFont(_FONT)
     f.setPointSizeF(7.5 * bubble_k())
     l.setFont(f)
     l.setFixedWidth(bs(_TITLE7_W))
     l.setFixedHeight(row_height())
     l.setStyleSheet("color:%s;background:transparent;" % color)
+    l.set_color(color)
     l.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
     return l
 

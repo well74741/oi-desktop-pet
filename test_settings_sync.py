@@ -156,6 +156,41 @@ blk = blk[:blk.index("_pre_dlg_scales")]
 check("打开设置窗前先合并磁盘最新设置（兜住只写盘的改动路径）",
       "self.settings.update(load_settings())" in blk)
 
+# ---------- 6. 在任务栏显示（任务管理器「应用」里能找到） ----------
+# 桌宠默认是 Qt.Tool 工具窗：不占任务栏，代价是任务管理器只在「后台进程」里列它。
+from PyQt5.QtCore import Qt as _Qt                        # noqa: E402
+
+# 注意：Qt.Tool 是复合标志（Popup|Dialog|Window），顶层窗口天然带 Qt.Window，
+# 用 flags & Qt.Tool 判断永远为真。必须比窗口类型掩码。
+def _wtype(w):
+    return w.windowFlags() & _Qt.WindowType_Mask
+
+check("任务栏可见：默认关（保持原来的工具窗行为，不平白多个任务栏按钮）",
+      not bool(pet.settings.get("taskbar_visible", False))
+      and _wtype(pet) == _Qt.Tool)
+check("任务栏可见：窗口有标题，任务管理器/进程工具里认得出来",
+      pet.windowTitle() == "oi桌宠")
+
+pet.apply_taskbar_visible(True)
+app.processEvents()
+check("任务栏可见：打开后摘掉 Qt.Tool（这样才会进任务管理器「应用」）",
+      _wtype(pet) != _Qt.Tool
+      and bool(pet.settings.get("taskbar_visible")))
+check("任务栏可见：切换后置顶与无边框没丢",
+      bool(pet.windowFlags() & _Qt.WindowStaysOnTopHint)
+      and bool(pet.windowFlags() & _Qt.FramelessWindowHint))
+check("任务栏可见：切换后标题还在（重建原生窗口会清掉，得接回来）",
+      pet.windowTitle() == "oi桌宠")
+
+_pos = pet.pos()
+pet.apply_taskbar_visible(False)
+app.processEvents()
+check("任务栏可见：关回去恢复工具窗",
+      _wtype(pet) == _Qt.Tool
+      and not bool(pet.settings.get("taskbar_visible")))
+check("任务栏可见：来回切不会把桌宠挪位置",
+      abs(pet.pos().x() - _pos.x()) <= 2 and abs(pet.pos().y() - _pos.y()) <= 2)
+
 try:
     pet.close()
 except Exception:

@@ -458,9 +458,8 @@ class _LWidgetRow(QWidget):
         self._card_lay.setContentsMargins(_kit_sc_b(5), _kit_sc_b(1),
                                           _kit_sc_b(5), _kit_sc_b(1))
         self._card_lay.setSpacing(_kit_sc_b(2))
-        # 标题栏：标题 + 右端收起按钮（在卡片内顶部）
+        # 标题栏：标题 + 右端展开/收起按钮（在卡片内顶部）
         from widgets import kit
-        from bubble_ui import _FoldButton
         self._head = QWidget(self._card)
         self._head.setAttribute(Qt.WA_TranslucentBackground, True)
         _hb = QHBoxLayout(self._head)
@@ -471,10 +470,10 @@ class _LWidgetRow(QWidget):
         self._title_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._title_label.setStyleSheet("color:#96a7c4;background:transparent;")
         _hb.addWidget(self._title_label, 1)
-        self.fold_btn = _FoldButton(self._head)
-        self.fold_btn.setCursor(Qt.PointingHandCursor)
+        # 用组件自带的那颗带底色的「展开」按钮（kit.expand_btn），不另造一套：
+        # 画布/拼豆/统计/Token 的折叠键都是它，样式与文案必须一致。
+        self.fold_btn = kit.expand_btn("收起")
         self.fold_btn.setToolTip("收起 / 展开这个模块")
-        self.fold_btn.set_down(True)          # 展开态：向下三角（点一下收起）
         self.fold_btn.clicked.connect(self._on_fold_clicked)
         _hb.addWidget(self.fold_btn, 0)
         # 标题栏高度必须正好是 row_height：title_extra() 按它算行高预算
@@ -494,7 +493,7 @@ class _LWidgetRow(QWidget):
         """收起 = 藏掉组件本体，只留标题栏（高度由外层按 title_extra 给）。"""
         on = bool(on)
         self._collapsed = on
-        self.fold_btn.set_down(not on)        # 收起态：向上三角（点一下展开）
+        self.fold_btn.setText("展开" if on else "收起")
         if self._widget is not None:
             self._widget.setVisible(not on)
 
@@ -925,14 +924,46 @@ class StatusBubbleLayout(StatusBubble):
               else _widget_height(widget, width - 24))
         return max(10, int(wh)) + wrap.title_extra()
 
+    def _wrap_of(self, widget):
+        """找到装着这个组件的那一行。"""
+        for w in self._row_widgets:
+            if _w_is_alive(w) and getattr(w, "_widget", None) is widget:
+                return w
+        return None
+
+    def _key_of(self, wrap):
+        for k, w in self._wrap_cache.items():
+            if w is wrap:
+                return str(k)
+        return None
+
+    def _on_widget_resize(self, widget):
+        """组件自己改了高度（画布/拼豆/统计/Token 的「展开」按钮）：平滑过渡。
+
+        以前这里直接 `_relayout`——瞬间重建。展开时因为紧跟着还有一次整框补位
+        动画，看着像"有动画"；收起时补位动画方向相反、又被新尺寸立刻盖掉，就成了
+        用户说的"一帧跳回去"。现在和行上的收起按钮共用同一条动画路径，两个方向
+        完全对称。
+        """
+        try:
+            wrap = self._wrap_of(widget)
+            if wrap is None or not self.isVisible() or self._fold_locked:
+                self._relayout()
+                return
+            h0 = wrap.height()
+            h1 = self._wrap_height(wrap, widget, self._FIX_W,
+                                   self._key_of(wrap))
+            if abs(int(h1) - int(h0)) <= 1:
+                self._relayout()      # 高度没变（比如只是刷新了内容）
+                return
+            self._start_row_fold(wrap, h0, h1)
+        except Exception:
+            self._relayout()
+
     def _on_row_fold(self, wrap):
         """点了组件行标题栏上的收起按钮：存状态 + 播一段高度动画。"""
         try:
-            key = None
-            for k, w in self._wrap_cache.items():
-                if w is wrap:
-                    key = str(k)
-                    break
+            key = self._key_of(wrap)
             target = not wrap.is_collapsed()
             s = getattr(self.pet, "settings", None)
             if isinstance(s, dict) and key:

@@ -77,22 +77,38 @@ p.on_resize = b._relayout
 p.show()
 app.processEvents()
 
+# 起手不许跳：动画第一帧必须正好等于点击前的外框高度。收起态比展开态多一行
+# 摘要标签，以前用"终局基座"算第一帧，实测收起先往上蹿 47px、展开先塌 22px，
+# 然后才开始动——就是"窗口跳了一帧才开始动画"。
+_h_before_fold = p.current_height()
+b.wrap_heights = []
 p.toggle_collapse()
 dl = time.time() + 1
 while time.time() < dl and p._fold_anim is not None:
     app.processEvents()
     time.sleep(0.02)
 app.processEvents()
+check("收起：动画首帧 = 点击前高度，不先跳一下（%d vs %d）"
+      % (b.wrap_heights[0] if b.wrap_heights else -1, _h_before_fold),
+      bool(b.wrap_heights) and abs(b.wrap_heights[0] - _h_before_fold) <= 1)
 check("收起动画完成", p._collapsed and not b._fold_locked
       and len(b.wrap_heights) > 5 and b.wrap_heights[-1] <= b.wrap_heights[0])
 check("折叠按钮朝上", not p.fold_btn._down)
 
+_h_before_unfold = p.current_height()
+b.wrap_heights = []
 p.toggle_collapse()
 dl = time.time() + 1
 while time.time() < dl and p._fold_anim is not None:
     app.processEvents()
     time.sleep(0.02)
 app.processEvents()
+check("展开：动画首帧 = 点击前高度，不先塌一下（%d vs %d）"
+      % (b.wrap_heights[0] if b.wrap_heights else -1, _h_before_unfold),
+      bool(b.wrap_heights) and abs(b.wrap_heights[0] - _h_before_unfold) <= 1)
+check("展开：全程单调变高，不来回抖",
+      all(b.wrap_heights[i] <= b.wrap_heights[i + 1] + 1
+          for i in range(len(b.wrap_heights) - 1)))
 check("展开动画完成", not p._collapsed and not b._fold_locked)
 check("折叠按钮朝下", p.fold_btn._down)
 
@@ -588,7 +604,8 @@ _wrap = [w for w in _fb._row_widgets
          if isinstance(w, bubble_layout._LWidgetRow)][0]
 _h_open, _bub_open = _wrap.height(), _fb.height()
 check("组件行收起：长条组件带上了收起按钮", hasattr(_wrap, "fold_btn")
-      and _wrap.fold_btn.isVisibleTo(_wrap) and not _wrap.is_collapsed())
+      and _wrap.fold_btn.isVisibleTo(_wrap) and not _wrap.is_collapsed()
+      and _wrap.fold_btn.text() == "收起")
 
 _seq = []
 _bubseq = []
@@ -643,8 +660,8 @@ _wrap2 = [w for w in _fb._row_widgets
 check("组件行收起：刷新重建行之后，收起态还在",
       _wrap2.is_collapsed()
       and _wrap2.height() == _wrap2.collapsed_height())
-check("组件行收起：重建后按钮状态也对得上（朝下 = 可展开）",
-      not _wrap2.fold_btn._down)
+check("组件行收起：重建后按钮状态也对得上（收起态写着「展开」）",
+      _wrap2.fold_btn.text() == "展开")
 
 _wrap2.fold_btn.click()
 _dl = time.time() + 2
@@ -659,6 +676,62 @@ check("组件行收起：再点一次完整还原（行高 %d → %d）"
 check("组件行收起：展开后状态从库里清掉",
       _fb.pet.settings.get("collapsed_widgets") == [])
 _fb.close()
+
+# ---------- 组件自带「展开」按钮：两个方向都要有动画 ----------
+# 以前 widget.on_resize = self._relayout（瞬间重建）：展开时后面还跟着一次整框
+# 补位动画，看着像"有动画"；收起时补位动画方向相反、又被新尺寸立刻盖掉，就成了
+# "一帧跳回去"。现在和行上的收起按钮共用同一条路径，两个方向必须对称。
+for _wname in ("tokenmeter", "stats"):
+    _w2, _werr = load_module_widget(_wname)
+    if _w2 is None:
+        check("组件自折叠(%s)：组件能加载" % _wname, False)
+        continue
+    _sb = StatusBubbleLayout(FakePet2())
+    _sb.pet.settings = {}
+    _sb._refresh = lambda *a, **k: None
+    for _t in ("_timer", "_mv_timer"):
+        _tm = getattr(_sb, _t, None)
+        if _tm is not None:
+            _tm.stop()
+    _sb._disp_rows = [("CPU", "50%", None), (_wname, "", _w2)]
+    _sb._relayout()
+    _sb.show()
+    app.processEvents()
+    _w2.on_resize = lambda _x=_w2, _b=_sb: _b._on_widget_resize(_x)
+    _btn2 = getattr(_w2, "_fold_btn", None)
+    check("组件自折叠(%s)：带底色的「展开」按钮在（文案统一，不叫「详情」）" % _wname,
+          _btn2 is not None and _btn2.text() == "展开")
+    _dirs = {}
+    for _label in ("展开", "收起"):
+        _h_b = _sb._wrap_of(_w2).height()
+        _s2, _b2 = [], []
+        _btn2.click()
+        _dl = time.time() + 2
+        while time.time() < _dl and getattr(_sb, "_rowfold", None) is not None:
+            app.processEvents()
+            time.sleep(0.004)
+            _wp = _sb._wrap_of(_w2)
+            if _wp is not None and (not _s2 or _s2[-1] != _wp.height()):
+                _s2.append(_wp.height())
+                _b2.append(_sb.height())
+        app.processEvents()
+        _dirs[_label] = (_s2, _b2, _h_b)
+    for _label, (_s2, _b2, _h_b) in _dirs.items():
+        _st2 = [_s2[i + 1] - _s2[i] for i in range(len(_s2) - 1)]
+        _lag2 = [abs((_b2[i] - _b2[-1]) - (_s2[i] - _s2[-1]))
+                 for i in range(len(_s2))]
+        check("组件自折叠(%s·%s)：是逐帧动画，不是一帧跳（%d 帧）"
+              % (_wname, _label, len(_s2)), len(_s2) >= 8)
+        check("组件自折叠(%s·%s)：全程单调，中途不回头" % (_wname, _label),
+              all(s >= 0 for s in _st2) or all(s <= 0 for s in _st2))
+        check("组件自折叠(%s·%s)：整框每帧跟着行走（最大偏差 %d px）"
+              % (_wname, _label, max(_lag2) if _lag2 else -1),
+              bool(_lag2) and max(_lag2) <= 2)
+    check("组件自折叠(%s)：两个方向帧数相当（展开 %d / 收起 %d）"
+          % (_wname, len(_dirs["展开"][0]), len(_dirs["收起"][0])),
+          abs(len(_dirs["展开"][0]) - len(_dirs["收起"][0])) <= 3)
+    _sb.close()
+
 data_store.DATA_DIR = _ds_dir_bak
 import shutil as _sh                                          # noqa: E402
 _sh.rmtree(_fold_sand, ignore_errors=True)

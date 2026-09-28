@@ -818,13 +818,11 @@ class ChatPanel(QWidget):
             # 流式期间预留最大高度，保持气泡尺寸稳定（输入区 + 150 历史区）
             return base + sp + _bs(150)
         if self._fold_anim is not None:
-            # 折叠动画期间：返回动画中的外框高度（历史区 + 输入区）。
-            # 基座高度用动画开始时算好的那份，全程恒定，免得中途变化导致抖动。
+            # 折叠动画期间：返回动画中的外框高度。与 _fold_tick 用同一条曲线、
+            # 同一对端点，保证"面板自报的高度"和"实际摆出来的几何"始终一致。
             a = self._fold_anim
             k = min(1.0, (time.monotonic() - a["t0"]) / max(0.01, a["dur"]))
-            e = ease_in_out(k)            # 与 _fold_tick 用同一条缓动
-            h = a["h0"] + (a["h1"] - a["h0"]) * e
-            return int(h) + self._fold_base
+            return int(round(self._fold_total(a, ease_in_out(k))))
         if not self._messages:
             return 0
         if self._collapsed:
@@ -836,6 +834,9 @@ class ChatPanel(QWidget):
         外框高度每帧同步往下收/向上抬，全程平滑，不做瞬间切尺寸。"""
         if self._fold_anim is not None:
             return   # 动画进行中忽略重复点击
+        # 改动任何可见性之前先记下真实外框高度：动画必须从这个值起步，
+        # 否则第一帧会直接跳到"终局基座"上（实测收起 +47px、展开 -22px）
+        total0 = float(self.current_height())
         if self._collapsed:
             # 展开：模块外框逐帧变高，窗口随模块同步顶长（锚点固定）
             self._collapsed = False
@@ -847,7 +848,7 @@ class ChatPanel(QWidget):
             self.layout().setAlignment(self.history, Qt.AlignBottom)
             self._capture_fold_anchor()
             self._lock_bubble(True)
-            self._start_hist_anim(0.0, float(self._calc_hist_h()))
+            self._start_hist_anim(0.0, float(self._calc_hist_h()), total0)
         else:
             # 收起：内容与外框下滑收拢（窗口不动），结束后平滑收气泡
             self._collapsed = True
@@ -855,9 +856,15 @@ class ChatPanel(QWidget):
             self.layout().setAlignment(self.history, Qt.AlignBottom)
             self._capture_fold_anchor()
             self._lock_bubble(True)
-            self._start_hist_anim(float(self._calc_hist_h()), 0.0)
+            self._start_hist_anim(float(self._calc_hist_h()), 0.0, total0)
 
-    def _start_hist_anim(self, h0, h1):
+    def _start_hist_anim(self, h0, h1, total0=None):
+        """历史区 h0->h1 的折叠动画。
+
+        `total0` 是点击前的真实外框高度。外框和历史区分别插值：收起态比展开态
+        多一行摘要标签，两端基座本来就不一样，只用终局基座算第一帧就会先跳一下
+        再开始动。给了 total0 之后，首帧严格等于点击前、末帧严格等于终局。
+        """
         # 动画每帧的"历史区以外"高度取终局值，全程恒定——中途变的话外框会抖
         sp = self.layout().spacing()
         base = self._base_h()
@@ -866,10 +873,19 @@ class ChatPanel(QWidget):
         elif not self._collapsed and self.collapsed_label.isVisibleTo(self):
             base -= sp + self.collapsed_label.sizeHint().height()
         self._fold_base = base + (sp if h1 > 0 or h0 > 0 else 0)
-        self._fold_anim = {"t0": time.monotonic(), "dur": _dist_dur(h1 - h0),
-                           "h0": h0, "h1": h1}
+        total1 = float(h1) + self._fold_base
+        if total0 is None:
+            total0 = float(h0) + self._fold_base
+        self._fold_anim = {"t0": time.monotonic(),
+                           "dur": _dist_dur(total1 - total0),
+                           "h0": h0, "h1": h1,
+                           "tot0": float(total0), "tot1": total1}
         self._fold_timer.start(ANIM_MS)
         self._fold_tick()
+
+    def _fold_total(self, a, e):
+        """动画进行到缓动值 e 时的外框高度。"""
+        return a["tot0"] + (a["tot1"] - a["tot0"]) * e
 
     def _fold_tick(self):
         """动画每帧：同步历史区高度与模块外框/气泡窗口高度（锚点固定），全程平滑。"""
@@ -882,7 +898,7 @@ class ChatPanel(QWidget):
             h = a["h0"] + (a["h1"] - a["h0"]) * e
             self.history.setFixedHeight(max(0, int(h)))
             # 模块外框（当前模块区域）同步收放；窗口本身不缩放，避免重影
-            self._bubble_fold_height(int(h) + self._fold_base)
+            self._bubble_fold_height(int(round(self._fold_total(a, e))))
             if k >= 1.0:
                 self._fold_timer.stop()
                 self._fold_anim = None
@@ -2503,9 +2519,12 @@ class StatusBubble(QWidget):
                                 widget = nw
                                 widget._ui_name = ui
                                 widget.set_rule(p.rule)
-                                # 组件高度变化（如收起/展开）时通知气泡重排
+                                # 组件高度变化（如收起/展开）时通知气泡重排。
+                                # 走 _on_widget_resize 而不是直接 _relayout：
+                                # 后者是瞬间重建，组件自己收起时就"一帧跳回去"。
                                 try:
-                                    widget.on_resize = self._relayout
+                                    widget.on_resize = (
+                                        lambda w=widget: self._on_widget_resize(w))
                                 except Exception:
                                     pass
                                 try:
@@ -3668,6 +3687,10 @@ class StatusBubble(QWidget):
         nx = fx + (tx - fx) * e
         ny = fy + (ty - fy) * e
         self.move(int(nx), int(ny))
+
+    def _on_widget_resize(self, widget):
+        """组件自己改了高度时的回调。基类没有行折叠动画，直接重排。"""
+        self._relayout()
 
     def _relayout(self):
         """固定宽度排版：所有规则常驻；交互规则标题占位 + 下方组件（按规则顺序）。"""

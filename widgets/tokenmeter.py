@@ -117,7 +117,7 @@ class Widget(ModuleWidget):
 
         self._refresh_btn = kit.ghost_btn("⟳", tip="手动刷新统计")
         self._refresh_btn.clicked.connect(self._refresh_data)
-        self._fold_btn = kit.expand_btn("详情")
+        self._fold_btn = kit.expand_btn("展开")
         self._fold_btn.clicked.connect(self._toggle_fold)
         self._row, rl, self._title, self._summary = kit.module_row(
             "Token 消耗", "—", actions=(self._refresh_btn, self._fold_btn))
@@ -150,7 +150,7 @@ class Widget(ModuleWidget):
 
     def _toggle_fold(self):
         self._collapsed = not self._collapsed
-        self._fold_btn.setText("收起" if not self._collapsed else "详情")
+        self._fold_btn.setText("收起" if not self._collapsed else "展开")
         self._expand.setVisible(not self._collapsed)
         self.setFixedHeight(self.current_height())
         if not self._collapsed:

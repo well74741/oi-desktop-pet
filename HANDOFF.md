@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.18 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.19 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -166,6 +166,46 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.19：折叠按钮统一成带底色的「展开」+ 三处动画补齐 + 标题滚动 + 任务栏可见 2026-09-28】
+  - **折叠按钮不再自造一套**。v0.9.18 在行标题栏加的是箭头 `_FoldButton`，
+    而画布/拼豆/统计/Token 早就用 `kit.expand_btn` 那颗带底色的胶囊按钮——
+    同一件事两种长相。现在行标题栏也用 `kit.expand_btn`，文案在「收起 / 展开」
+    之间切；统计与 Token 原来写的是「详情」，一并统一成「展开」。
+  - **组件自带「展开」按钮收起时"一帧跳回去"**。根因：`widget.on_resize`
+    直接挂的是 `self._relayout`（瞬间重建）。展开时后面紧跟一次整框补位动画，
+    看着像"有动画"；收起时补位动画方向相反、又被新尺寸立刻盖掉，就成了一帧切。
+    新增 `_on_widget_resize()`：找到组件所在行，走和行折叠按钮同一条
+    `_start_row_fold` 路径。实测 Token/统计 展开与收起各 14 帧、单调、整框逐帧
+    偏差 0px，两个方向完全对称。
+  - **AI 助手折叠"先跳一帧再开始动"**。根因：`_start_hist_anim` 用**终局基座**
+    算第一帧，而屏幕上还是起始状态——收起态比展开态多一行摘要标签，两端基座
+    本来就不一样。实测收起先往上蹿 47px、展开先塌 22px。改成 `toggle_collapse`
+    在改动任何可见性**之前**记下真实外框高度 `total0`，动画在 `tot0 -> tot1`
+    之间插值，`current_height()` 也用同一对端点。实测起手跳 47/22px → **0px**。
+  - **模块行标题装不下会滚动**（用户反馈：「Token 消耗」显示成「Token 消」）。
+    标题列是固定 44px（各模块要对齐），新增 `kit.ScrollLabel`：保持 QLabel 的
+    完整 API，只在放不下时改成横向滚动字幕。**所有实例共用一个类级定时器**，
+    且只在"确实有可见标签要滚"时才跑——一个标签一个 QTimer 会让待机白白多出
+    几十次/秒的唤醒。实测全部隐藏后定时器自动停。
+  - **在任务栏显示**（用户反馈：任务管理器里找不到桌宠）。桌宠一直是 `Qt.Tool`
+    工具窗：不占任务栏、不进 Alt+Tab，代价是任务管理器只在**「后台进程」**里
+    列它（名字取 exe 的 FileDescription「oi桌宠桌面宠物」），不在「应用」里。
+    设置里新增「在任务栏显示」（**默认关**，保持原行为）：打开就摘掉 `Qt.Tool`，
+    于是进「应用」分组。顺带给主窗口补了 `setWindowTitle("oi桌宠")`。
+    **坑**：`setWindowFlags` 会重建原生窗口，标题/透明/置顶/位置都得自己接回来；
+    还有 `Qt.Tool` 是复合标志（Popup|Dialog|Window），顶层窗口天然带 `Qt.Window`，
+    `flags & Qt.Tool` 永远为真——必须比 `flags & Qt.WindowType_Mask`。
+  - **踩坑（打包闸门拦下来的）**：`ScrollLabel` 第一版用强引用列表登记所有实例、
+    并写了 `__del__` 做注销。两个问题：① 强引用让历来所有标题标签都留在内存里
+    （气泡每次刷新都重建模块行，只涨不降）；② `__del__` 在 Qt 析构期回调 Python
+    会踩已释放的 C++ 对象，**打包用的 Python 3.12 环境直接 segfault**（开发用的
+    3.14 跑同一份代码却过了——所以别只信一个解释器的结果）。改成 `weakref.ref`
+    登记、去掉 `__del__`、`_tick_all` 顺手清死条目。`test_geometry.py` 已把
+    "必须是弱引用""不许有 `__del__`""登记表会收缩"钉死。
+  - 测试：`test_bubble.py` 106→125、`test_geometry.py` 39→52、
+    `test_settings_sync.py` 14→21。9 个套件在开发（3.14）和打包（3.12）两个
+    解释器上都全通过。
 
 - 【v0.9.18：长条组件加展开/收起按钮 + 折叠动画统一成一条路径 2026-09-28】
   - **组件行自带收起按钮**（用户反馈：便签这类长条模块太占空间）。`_LWidgetRow`
@@ -1492,15 +1532,15 @@ PyInstaller 6.21（打包）。
 
 ```powershell
 python run_all_tests.py                           # 一键跑完所有套件（打包闸门用的也是它）
-python -u test_bubble.py                          # 气泡/模块契约/模块行几何/组件行折叠回归测试（106 项）
+python -u test_bubble.py                          # 气泡/模块契约/行几何/折叠动画回归测试（125 项）
 python -u test_components_scale.py                 # 组件缩放回归测试
 python -u test_templates.py                        # 模块模板验证（111 项，新增模板必跑）
 python -u test_webchat.py                          # 聚合AI：站点/摆位/粘住网页窗口/切换不闪/输入法/打开入口（54 项）
 python -u test_pet_anim.py                         # 倾角动画 + 空盘开合 + 提示排版 + 悬停提示 + 动图暂停（50 项）
-python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性（14 项，沙箱隔离）
+python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性 + 任务栏可见（21 项，沙箱隔离）
 python -u test_autostart.py                        # 开机自启读写与自愈（19 项，沙箱注册表键）
 python -u test_data_store.py                       # 原子写 + 每日滚动快照（13 项）
-python -u test_geometry.py                         # 几何不变式：三档 × 所有行/组件不出框、同中线（39 项）
+python -u test_geometry.py                         # 几何不变式：三档 × 不出框/同中线/标题滚动（52 项）
 python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（23 项，临时 profile，跑完即删）
 python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位
 python _prune_dist.py [--dry] [保留版本数]         # 清理 dist 历史产物（打包脚本已自动调）
