@@ -13,7 +13,7 @@ import time
 # 依此生成，不必再逐个文件改。
 # 编号规则：1.0 之前用两位小版本（0.9.03 -> 0.9.04 -> …），留足迭代空间；
 # 1.0 留给正式版。
-APP_VERSION = "0.9.26"
+APP_VERSION = "0.9.27"
 
 _CHAT_PANEL_UIS = {"chat"}
 _TITLE_LESS_WIDGET_UIS = {"canvas", "tokenmeter", "stats", "perler"}

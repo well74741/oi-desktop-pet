@@ -365,6 +365,46 @@ _spec = importlib.util.spec_from_file_location(
 _WL = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_WL)
 
+# ---------- 不变式：当前页面活着就必须看得见（主区域不许空白） ----------
+# 回归（用户报"点开聚合AI 主区域一片空白"）：页面被接管了（标题栏都换成站点名了）
+# 却一直藏着。_reveal 那条链路有好几种半路作废的情形（0.8 秒内又切了站点、接管
+# 被重入、显示那一步被跳过……），任何一种都会让页面永远藏着，之后再没人管它。
+# 与其逐个堵竞态，不如让心跳守住这条不变式。
+_vis_state = {"v": False}
+_hid = []
+L.window_visible = lambda h: _vis_state["v"]
+L.show_browser = lambda h: (_vis_state.__setitem__("v", True),
+                            CALLS.append(("show", h)), True)[2]
+L.hide_browser = lambda h: (_hid.append(h), CALLS.append(("hide", h)), True)[2]
+L.fit_ok = lambda h, holder, tol=3: True
+
+_hb = webchat_ui.WebChatHost()
+_hb.resize(900, 600)
+_hb.show()
+app.processEvents()
+_hb._hwnd = 5001
+_hb._pages = {5001, 5002}
+CALLS.clear()
+_vis_state["v"] = False          # 页面藏着 —— 就是"主区域空白"那个状态
+_hb._tick()
+check("主区域不空白：心跳发现当前页面藏着就把它显示出来",
+      ("show", 5001) in CALLS)
+check("主区域不空白：顺手把别的页面藏好（只留当前这个）",
+      5002 in _hid and 5001 not in _hid)
+CALLS.clear()
+_hb._tick()
+check("主区域不空白：已经可见时不会每拍都重复 show（不抖）",
+      not [c for c in CALLS if c[0] == "show"])
+_vis_state["v"] = False
+_hb.hide()
+app.processEvents()
+CALLS.clear()
+_hb._tick()
+check("主区域不空白：宿主自己都没显示时不去碰页面",
+      not [c for c in CALLS if c[0] == "show"])
+_hb.close()
+app.processEvents()
+
 # ---------- 摆位路径绝不阻塞主线程 ----------
 # 回归（用户报"打开聚合AI 除 deepseek 外整个桌宠非常卡，拖动时页面和侧边栏
 # 分离"）：fit_browser 里曾经有一句 browser_insets(hwnd, timeout=0.25)，

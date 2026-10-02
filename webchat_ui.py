@@ -719,7 +719,34 @@ class WebChatHost(QWidget):
             # 系统 DPI 变了、重试窗口已经过期……）。心跳每 600ms 一次，代价极低，
             # 但保证"错位"不会是个永久状态。
             self.refit()
+        self._ensure_page_shown()
         self.bar.refresh_active()
+
+    def _ensure_page_shown(self):
+        """不变式：宿主开着、当前页面也活着，那它就**必须**是看得见的。
+
+        用户反馈"点开聚合AI 主区域一片空白"——当前页面被接管了（标题栏都已经
+        换成站点名），却没有显示出来。`_reveal` 那条链路有好几种半路作废的情形
+        （0.8 秒内又切了站点、接管被重入、显示那一步被跳过……），任何一种都会让
+        页面永远藏着，而且之后再没人管它。
+
+        与其逐个堵竞态，不如在心跳里守住这条不变式：不可见就显示出来，顺手把
+        别的页面藏好。代价是每 600ms 一次 IsWindowVisible，可以忽略。
+        """
+        L = self._L
+        h = self._hwnd
+        if not h or not self.isVisible() or self.isMinimized():
+            return
+        try:
+            if L.window_visible(h):
+                return
+            L.show_browser(h)
+            self.refit()
+            for other in list(self._pages):
+                if other != h:
+                    L.hide_browser(other)
+        except Exception:
+            pass
 
 
 _HOST = None

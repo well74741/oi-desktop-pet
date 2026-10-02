@@ -402,6 +402,19 @@ def window_alive(hwnd):
     return _is_live_browser_window(hwnd)
 
 
+def window_visible(hwnd):
+    """窗口当前是不是显示着的（被 SW_HIDE 藏起来的返回 False）。
+
+    宿主用它守"当前页面必须看得见"这条不变式——接管链路半路作废时页面会一直
+    藏着，主区域就是一片空白。
+    """
+    try:
+        u, ctypes, wt = _win32()
+        return bool(u.IsWindowVisible(ctypes.c_void_p(hwnd)))
+    except Exception:
+        return True      # 问不出来就当它是可见的，别反复去 show
+
+
 def dpi_scale_at(x, y):
     """含物理坐标点 (x, y) 的显示器缩放比（1.0 / 1.25 / 1.5 …）。
 
