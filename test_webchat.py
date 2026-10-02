@@ -270,8 +270,14 @@ STATE["last"] = "Kimi"
 webchat_ui.open_webchat(None)
 check("打开：没有窗口时开上次用的站点",
       OPENED and OPENED[-1][0]["name"] == "Kimi")
-check("打开：按网页容器的尺寸开窗（省一次回流）",
-      OPENED[-1][1] == STATE["client"])
+# 开窗尺寸按模式分：旧架构有网页容器，就按容器尺寸开（省一次回流）；
+# 贴边栏模式下没有容器（浏览器窗口自己就是那个窗口），用上次记住的尺寸。
+if webchat_ui.dock_mode():
+    check("打开（贴边栏模式）：按上次记住的窗口尺寸开",
+          OPENED[-1][1] == L.preferred_size())
+else:
+    check("打开（宿主模式）：按网页容器的尺寸开窗（省一次回流）",
+          OPENED[-1][1] == STATE["client"])
 
 STATE["last"] = "已经删掉的站"
 webchat_ui.open_webchat(None)
@@ -477,6 +483,45 @@ check("内缩：从没量到过就不乱摆（返回 None，等下一次 refit�
 _WL.forget_insets(_HWND)
 check("内缩：解绑/清理后缓存没了（HWND 复用不会继承旧内缩）",
       _WL.last_insets(_HWND) is None)
+
+# ---------- 贴边栏模式（方案一）：开关与接线 ----------
+# 真实窗口行为由 _check_dock.py 验（要起浏览器）；这里只守"接线对不对"。
+import webchat_dock                                            # noqa: E402
+
+_src_dock = open(os.path.join(HERE_WL, "webchat_dock.py"),
+                 encoding="utf-8").read()
+check("贴边栏：SetParent 之前先置 WS_CHILD（只调 SetParent 的话挂不上）",
+      "_WS_CHILD" in _src_dock
+      and _src_dock.index("SetWindowLongW") < _src_dock.index("SetParent(ctypes"))
+check("贴边栏：几何用 Win32 摆，不用 Qt 的 setGeometry（会被布局改回去）",
+      "SetWindowPos" in _src_dock)
+check("贴边栏：有低频定时器盯父窗口尺寸（位置系统管，尺寸不管）",
+      "SYNC_MS" in _src_dock and "_sync" in _src_dock)
+check("贴边栏：挂接掉了会重新挂（Edge 重建窗口）",
+      "_reparent()" in _src_dock and "GetParent" in _src_dock)
+check("贴边栏：默认收成窄边，鼠标移上去才展开（不长期盖住页面）",
+      "EDGE_W" in _src_dock and "enterEvent" in _src_dock)
+
+_real_ls = None
+try:
+    import pet_gravity as _PGW
+    _real_ls = _PGW.load_settings
+    _PGW.load_settings = lambda: {"webchat_dock": True}
+    check("贴边栏：开关为真时 dock_mode() 成立", webchat_ui.dock_mode())
+    _PGW.load_settings = lambda: {"webchat_dock": False}
+    check("贴边栏：开关为假时退回旧宿主架构", not webchat_ui.dock_mode())
+    _PGW.load_settings = lambda: {}
+    check("贴边栏：没设过这个键时默认启用", webchat_ui.dock_mode())
+finally:
+    if _real_ls is not None:
+        _PGW.load_settings = _real_ls
+
+check("贴边栏：launcher 提供了 restore_browser（把窗口从隐藏坐标摆回屏内）",
+      callable(getattr(L, "restore_browser", None)))
+_src_wl2 = open(os.path.join(HERE_WL, "webchat_launcher.py"),
+                encoding="utf-8").read()
+check("贴边栏：restore_browser 会处理最小化并重新摆位",
+      "IsIconic" in _src_wl2 and "compute_placement(near" in _src_wl2)
 
 check("用户数据没有被测试改写", SAVED == [])
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))

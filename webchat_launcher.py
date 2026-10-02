@@ -402,6 +402,63 @@ def window_alive(hwnd):
     return _is_live_browser_window(hwnd)
 
 
+def _monitor_work_area(near):
+    """near 所在显示器的工作区 (x, y, w, h)；取不到退回主屏。
+
+    这里不用 Qt（本模块是纯 Win32 后端），直接问 MonitorFromPoint + GetMonitorInfo。
+    """
+    try:
+        u, ctypes, wt = _win32()
+
+        class _MI(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", wt.RECT),
+                        ("rcWork", wt.RECT), ("dwFlags", ctypes.c_ulong)]
+
+        if near:
+            px = int(near[0] + near[2] // 2)
+            py = int(near[1] + near[3] // 2)
+        else:
+            px = py = 0
+        pt = ctypes.c_longlong((py << 32) | (px & 0xFFFFFFFF))
+        mon = u.MonitorFromPoint(pt, 2)        # MONITOR_DEFAULTTONEAREST
+        mi = _MI()
+        mi.cbSize = ctypes.sizeof(_MI)
+        if mon and u.GetMonitorInfoW(ctypes.c_void_p(mon), ctypes.byref(mi)):
+            r = mi.rcWork
+            return (r.left, r.top, r.right - r.left, r.bottom - r.top)
+        return (0, 0, u.GetSystemMetrics(0), u.GetSystemMetrics(1))
+    except Exception:
+        return (0, 0, 1920, 1080)
+
+
+def restore_browser(hwnd, near=None):
+    """把网页窗口从"隐藏/最小化"状态恢复到屏内正常位置。
+
+    `open_site` 是先 `--hide` 开出来再交给上层摆位的；旧架构由宿主负责，
+    贴边栏模式下没有宿主，就得这里自己来——不恢复的话窗口停在
+    (-32000, -32000)，用户什么都看不到。
+
+    位置：有 `near`（桌宠矩形）就按 `compute_placement` 摆在它旁边，
+    否则保持窗口自己的尺寸、居中到当前屏幕。
+    """
+    try:
+        u, ctypes, wt = _win32()
+        SW_SHOWNOACTIVATE, SW_RESTORE = 4, 9
+        if u.IsIconic(ctypes.c_void_p(hwnd)):
+            u.ShowWindow(ctypes.c_void_p(hwnd), SW_RESTORE)
+        r = window_rect(hwnd)
+        w, h = (r[2], r[3]) if r else preferred_size()
+        work = _monitor_work_area(near)
+        x, y, w, h = compute_placement(near, work, (w, h))
+        SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
+        u.SetWindowPos(ctypes.c_void_p(hwnd), None, int(x), int(y),
+                       int(w), int(h), SWP_NOZORDER | SWP_NOACTIVATE)
+        u.ShowWindow(ctypes.c_void_p(hwnd), SW_SHOWNOACTIVATE)
+        return True
+    except Exception:
+        return False
+
+
 def window_visible(hwnd):
     """窗口当前是不是显示着的（被 SW_HIDE 藏起来的返回 False）。
 

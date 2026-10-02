@@ -95,21 +95,33 @@ class _Opener(QObject):
 
     def _on_done(self, ok, err, finished):
         self._busy = False
-        if not ok:
+        if not ok and not dock_mode():
             h = host(create=False)
             if h is not None:
                 h.set_loading("")   # 开失败了，别让提示一直转
         if ok:
             import webchat_launcher as L
             _name, hwnd = L.active()
-            h = host()
-            if hwnd and h is not None:
-                h.attach(hwnd)     # 接管新窗口，内部会把上一个摘掉并关掉
+            if dock_mode():
+                attach_dock(hwnd)          # 站点栏挂进网页窗口
+            else:
+                h = host()
+                if hwnd and h is not None:
+                    h.attach(hwnd)  # 接管新窗口，内部会把上一个摘掉并关掉
         if callable(finished):
             try:
                 finished(ok, err)
             except Exception:
                 pass
+
+
+def L_preferred_size():
+    """贴边栏模式下网页窗口该开多大：沿用上次用过的尺寸。"""
+    try:
+        import webchat_launcher as L
+        return L.preferred_size()
+    except Exception:
+        return (960, 720)
 
 
 _OPENER = None
@@ -123,7 +135,13 @@ def opener():
 
 
 def open_site_ui(site, near=None, finished=None):
-    """打开一个站点：宿主窗口先就位，网页开出来后塞进它的容器。"""
+    """打开一个站点。
+
+    贴边栏模式下**不开宿主窗口**：浏览器窗口自己就是那个窗口，开出来之后把
+    站点栏挂进去（见 _Opener._on_done）。旧架构仍走下面那条宿主路径。
+    """
+    if dock_mode():
+        return opener().open(site, L_preferred_size(), finished)
     h = host()
     h.place_near(near)             # 只有首次（还没显示过）才摆位
     if not h.isVisible():
@@ -134,6 +152,57 @@ def open_site_ui(site, near=None, finished=None):
     # 否则看着像打不开（用户反馈"等了很久，加载时画面是空白的"）
     h.set_loading(str((site or {}).get("name") or ""))
     return opener().open(site, h.holder_size(), finished)
+
+
+# ==================== 贴边栏模式（方案一） ====================
+# 旧架构：我们开宿主窗口，把浏览器窗口摆到容器上 —— 两个顶层窗口、两个进程，
+# 永远不可能原子地一起移动，中间那一帧就是"断层 / 拖动延迟"。
+# 贴边栏模式：浏览器窗口就是那个窗口，站点栏挂进去当它的子窗口，位置由系统
+# 保证跟随（实测相对偏移恒定）。详见 webchat_dock.py。
+#
+# 用设置里的 `webchat_dock` 开关切换，旧路径完整保留做退路。
+
+_DOCK = None
+
+
+def dock_mode():
+    """当前是不是贴边栏模式（默认开；settings 里可以关回旧架构）。"""
+    try:
+        import pet_gravity
+        return bool(pet_gravity.load_settings().get("webchat_dock", True))
+    except Exception:
+        return True
+
+
+def dock(create=True):
+    global _DOCK
+    if _DOCK is None and create:
+        from webchat_dock import DockBar
+        _DOCK = DockBar()
+    return _DOCK
+
+
+def attach_dock(hwnd, near=None):
+    """把站点栏挂到网页窗口上，并把窗口本身摆好显示出来（贴边栏模式的"接管"）。
+
+    **必须自己 restore + 摆位**：网页窗口是 `--hide` 着开出来的，旧架构里由宿主
+    负责把它摆到容器上；贴边栏模式下没有宿主了，没人管它就停在 (-32000,-32000)
+    那个"最小化"坐标上，窗口等于看不见（第一版就栽在这，而且断言只比了相对位置
+    所以还"通过"了）。
+    """
+    import webchat_launcher as L
+    if not hwnd:
+        return False
+    L.restore_browser(hwnd, near=near)
+    L.show_browser(hwnd)
+    L.focus_browser(hwnd)
+    d = dock()
+    ok = d.attach_to(hwnd)
+    try:
+        d.bar.refresh_active()
+    except Exception:
+        pass
+    return ok
 
 
 # ==================== 打开入口 ====================
