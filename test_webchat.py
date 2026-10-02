@@ -567,8 +567,16 @@ check("贴边栏：窄边宽度够点得到，也不至于挡住页面",
 check("贴边栏：收起态只占左缘中间一小段高度，不贴满整条边",
       30 <= webchat_dock.DockBar.HANDLE_H <= 120
       and "_handle_h" in _src_dock and "HANDLE_H" in _src_dock)
-check("贴边栏：收起态半透明（挡住的那一小块也能透出页面）",
-      225 <= webchat_dock.DockBar.COLLAPSED_ALPHA <= 245)
+check("贴边栏：收起态很透（浅色网页上也不显眼）",
+      60 <= webchat_dock.DockBar.COLLAPSED_ALPHA <= 100)
+# 圆角必须靠裁窗口形状：在矩形窗口里 drawRoundedRect 的话，圆角外那几个像素
+# 没人画，在浅色网页上就是四个黑角（用户反馈"其他页面时边角是黑的"）。
+check("贴边栏：圆角靠 SetWindowRgn 裁窗口，不是在方窗口里画圆角",
+      "SetWindowRgn" in _src_dock and "CreateRoundRectRgn" in _src_dock
+      and "_apply_region" in _src_dock)
+check("贴边栏：鼠标离开立即收起（不留延迟）",
+      "_collapse_timer" not in _src_dock
+      and "_set_expanded(False)" in _src_dock.split("def leaveEvent")[1][:400])
 check("贴边栏：半透明走 Qt 的 setWindowOpacity（自己置 WS_EX_LAYERED 会被 Qt 覆盖）",
       "setWindowOpacity" in _src_dock
       and "SetLayeredWindowAttributes" not in _src_dock)

@@ -51,6 +51,7 @@ from PyQt5.QtWidgets import QWidget
 from widgets import kit
 
 _u = ctypes.windll.user32
+_g = ctypes.windll.gdi32
 for _fn in ("SetParent", "GetParent", "GetWindow"):
     getattr(_u, _fn).restype = ctypes.c_void_p
 _u.SetParent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -61,6 +62,7 @@ _WS_CHILD = 0x40000000
 _WS_POPUP = 0x80000000
 _SWP_NOACTIVATE = 0x0010
 _HWND_TOP = 0
+_RGN_OR = 2            # CombineRgn 的 RGN_OR
 
 
 def _as_long(v):
@@ -90,7 +92,7 @@ class DockBar(QWidget):
     SYNC_MS = 120          # 盯父窗口尺寸的间隔（只在变化时才动手，代价极低）
     EDGE_W = 14            # 收起态留的那条窄边（逻辑像素）
     HANDLE_H = 64          # 收起态只占这么高（居中），不再贴满整条左缘
-    COLLAPSED_ALPHA = 236  # 收起态不透明度（255 的 92.5%，= 7.5% 透明）
+    COLLAPSED_ALPHA = 79   # 收起态不透明度（255 的 31%，= 约 69% 透明）
     SLIDE_MS = 16          # 滑出/滑回的动画步长
     SLIDE_DUR = 0.18       # 滑出/滑回的时长（秒），和桌宠其他折叠动画一个手感
 
@@ -116,10 +118,6 @@ class DockBar(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(self.SYNC_MS)
         self._timer.timeout.connect(self._sync)
-        self._collapse_timer = QTimer(self)
-        self._collapse_timer.setSingleShot(True)
-        self._collapse_timer.setInterval(450)
-        self._collapse_timer.timeout.connect(lambda: self._set_expanded(False))
         self._slide = QTimer(self)
         self._slide.setInterval(self.SLIDE_MS)
         self._slide.timeout.connect(self._slide_tick)
@@ -146,7 +144,6 @@ class DockBar(QWidget):
     def forget_native(self):
         """句柄已经没了，别让 Qt 的析构再去 DestroyWindow 它。"""
         self._timer.stop()
-        self._collapse_timer.stop()
         self._slide.stop()
         self._hwnd = None
         try:
@@ -193,7 +190,6 @@ class DockBar(QWidget):
         永远挂不回去，表现和"被连带销毁"一模一样（都是没有侧边栏）。
         """
         self._timer.stop()
-        self._collapse_timer.stop()
         self._slide.stop()
         try:
             if not self.is_dead():
@@ -290,6 +286,7 @@ class DockBar(QWidget):
         show_bar = w > self._edge_w + kit.ui(2)
         if show_bar != self.bar.isVisible():
             self.bar.setVisible(show_bar)
+        self._apply_region(w, h, not show_bar)
         self._apply_alpha(k)
         self.update()
 
@@ -317,8 +314,10 @@ class DockBar(QWidget):
     def paintEvent(self, ev):
         """收起态画一个小把手；展开态画栏的底色。
 
-        收起态是**常态**，所以它必须看着是刻意设计的一个把手，而不是一条
-        被切掉一半的侧边栏，而且要尽量少挡页面。
+        这里**整块填满**就行，圆角交给 `_apply_region()` 去裁窗口形状。
+        早先是在矩形窗口里 `drawRoundedRect`，圆角外那几个像素没人画 ——
+        在浅色网页上就是四个黑角（用户反馈"不是圆角，其他页面时边角是黑的"）。
+        窗口自己被裁成圆角之后，那几个像素根本不属于我们，页面直接透上来。
         """
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -328,15 +327,41 @@ class DockBar(QWidget):
             p.setPen(QPen(QColor(42, 51, 70), 1))
             p.drawLine(w - 1, 0, w - 1, h)
             return
-        # 收起态：整个窗口就是那个把手，右侧圆角，左边贴着窗口边缘
-        r = kit.ui(5)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(28, 35, 49))
-        p.drawRoundedRect(QRectF(-r, 0, w + r, h), r, r)
+        p.fillRect(0, 0, w, h, QColor(28, 35, 49))
         gw, gh = max(2, kit.ui(3)), min(kit.ui(26), max(kit.ui(8), h - kit.ui(16)))
+        p.setPen(Qt.NoPen)
         p.setBrush(QColor(74, 158, 255, 210))
         p.drawRoundedRect(QRectF((w - gw) / 2.0, (h - gh) / 2.0, gw, gh),
                           gw / 2.0, gw / 2.0)
+
+    def _apply_region(self, w, h, rounded):
+        """把窗口本身裁成形状：收起态右侧圆角，展开态方的。
+
+        用 Win32 的 `SetWindowRgn` 而不是在 `paintEvent` 里画圆角 —— 画的话圆角
+        外面那几个像素仍然属于窗口、只是没人画，于是显示成黑角。裁区域是真的把
+        那块挖掉，底下的网页直接透上来。
+        左边两角保持直角：这条把手是**贴着浏览器窗口左缘**的，左边也倒角的话会
+        在窗口边上露出两个豁口，看着像没贴稳。
+        """
+        key = (w, h, bool(rounded))
+        if key == getattr(self, "_rgn_now", None):
+            return
+        try:
+            hw = ctypes.c_void_p(int(self.winId()))
+            if not rounded:
+                _u.SetWindowRgn(hw, None, True)
+                self._rgn_now = key
+                return
+            r = max(2, kit.ui(5))
+            rgn = _g.CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2)
+            left = _g.CreateRectRgn(0, 0, r, h + 1)      # 左边两角填回直角
+            _g.CombineRgn(rgn, rgn, left, _RGN_OR)
+            _g.DeleteObject(left)
+            if not _u.SetWindowRgn(hw, rgn, True):
+                _g.DeleteObject(rgn)                     # 没接管就自己删，别漏 GDI
+            self._rgn_now = key
+        except Exception:
+            pass
 
     # ---------- 自动隐藏 ----------
     def _set_expanded(self, on):
@@ -377,16 +402,19 @@ class DockBar(QWidget):
 
     def enterEvent(self, ev):
         super().enterEvent(ev)
-        self._collapse_timer.stop()
         self._set_expanded(True)
 
     def leaveEvent(self, ev):
+        """鼠标一离开就收 —— 用户要的是"不用延迟收起"。
+
+        原来有 450ms 的延迟表（手抖划出去一下不至于闪），但在这里不划算：
+        这条栏很窄，鼠标多半是"用完就走"，延迟反而像卡住没反应。
+        """
         super().leaveEvent(ev)
-        self._collapse_timer.start()      # 晚一点再收，手抖一下不会闪
+        self._set_expanded(False)
 
     def event(self, ev):
         # 子控件上的进入/离开也算在栏上（鼠标在按钮上时不要收起）
         if ev.type() == QEvent.Enter:
-            self._collapse_timer.stop()
             self._set_expanded(True)
         return super().event(ev)

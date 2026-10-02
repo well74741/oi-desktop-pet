@@ -239,9 +239,24 @@ try:
                                           ctypes.byref(flags))
         check("收起态半透明真的生效了（WS_EX_LAYERED 已置上）",
               bool(ex & 0x00080000), "exstyle=0x%08X" % ex)
-        check("收起态是半透明的（用户要的那点透明度）",
-              bool(got) and 225 <= alpha.value <= 245,
-              "alpha=%d（255 为实心）" % alpha.value)
+        check("收起态很透（浅色网页上也不显眼）",
+              bool(got) and 60 <= alpha.value <= 100,
+              "alpha=%d / 255，约 %.0f%% 透明"
+              % (alpha.value, (1 - alpha.value / 255.0) * 100))
+        # 圆角要靠裁窗口形状，不能在矩形窗口里画圆角（圆角外会是黑的）
+        # GetWindowRgn 必须传一个**真的 HRGN** 进去接收，传 NULL 一律返回
+        # ERROR(0) —— 第一版探针就是这么写的，白白"失败"了两轮。
+        _gdi = ctypes.windll.gdi32
+        _tmp = _gdi.CreateRectRgn(0, 0, 1, 1)
+        rgn_kind = u.GetWindowRgn(ctypes.c_void_p(dh_now), _tmp)
+        rb = ctypes.create_string_buffer(16)
+        _gdi.GetRgnBox(_tmp, rb)
+        rbx = struct.unpack("4i", rb.raw)
+        _gdi.DeleteObject(_tmp)
+        # 1=NULLREGION 2=SIMPLEREGION 3=COMPLEXREGION 0=ERROR(没设区域)
+        check("收起态窗口被裁成了圆角（不是在方窗口里画圆角，所以没有黑边角）",
+              rgn_kind == 3,
+              "GetWindowRgn=%d（3=复杂区域即圆角）区域盒 %s" % (rgn_kind, rbx))
 
         d3._set_expanded(True)
         pump(0.5)

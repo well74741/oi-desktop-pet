@@ -86,6 +86,7 @@ def main():
     print("全部通过。手动验证项：_check_host.py（聚合AI 真实窗口）、"
           "_check_launch_cwd.py（启动外部程序不继承桌宠目录）、"
           "_check_dock_life.py（贴边栏切站点/被关掉/收起态）、"
+          "_check_dock_drag.py（拖窗口时贴边栏的开销）、"
           "_check_chatpanel.py（对话面板几何）")
     return 0
 
