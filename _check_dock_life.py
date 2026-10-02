@@ -239,8 +239,8 @@ try:
                                           ctypes.byref(flags))
         check("收起态半透明真的生效了（WS_EX_LAYERED 已置上）",
               bool(ex & 0x00080000), "exstyle=0x%08X" % ex)
-        check("收起态不透明度约 85%（= 用户要的 15% 透明）",
-              bool(got) and 200 <= alpha.value <= 230,
+        check("收起态是半透明的（用户要的那点透明度）",
+              bool(got) and 225 <= alpha.value <= 245,
               "alpha=%d（255 为实心）" % alpha.value)
 
         d3._set_expanded(True)
@@ -256,6 +256,27 @@ try:
         check("展开后变回实心（按钮文字不该是半透的）",
               (not ex2 & 0x00080000) or (got2 and alpha2.value == 255),
               "exstyle=0x%08X got=%s alpha=%d" % (ex2, bool(got2), alpha2.value))
+        # ---------- ⑥ 展开必须是纯横向的（不能从左缘中间往上下撑开） ----------
+        d3._set_expanded(False)
+        pump(0.5)
+        pr2 = rect_of(d3._hwnd) if d3._hwnd else None
+        hs, ys = [], []
+        d3._set_expanded(True)
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 0.45:
+            app.processEvents()
+            rr = rect_of(int(d3.winId()))
+            if rr and int(round(d3._k)) != 0 and d3._k > 0:
+                hs.append(rr[3]); ys.append(rr[1])
+            time.sleep(0.008)
+        if pr2 and hs:
+            check("展开全程高度就是满高（不是从中间往上下撑开）",
+                  len(set(hs)) == 1 and abs(hs[0] - pr2[3]) <= 4,
+                  "量到的高度集合 %s / 窗口高 %d"
+                  % (sorted(set(hs))[:4], pr2[3]))
+            check("展开全程顶边不动（纯横向展开）",
+                  len(set(ys)) == 1 and abs(ys[0] - pr2[1]) <= 4,
+                  "量到的顶边集合 %s / 窗口顶 %d" % (sorted(set(ys))[:4], pr2[1]))
         d3._set_expanded(False)
         pump(0.4)
 finally:

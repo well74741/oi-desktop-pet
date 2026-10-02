@@ -567,13 +567,17 @@ check("贴边栏：窄边宽度够点得到，也不至于挡住页面",
 check("贴边栏：收起态只占左缘中间一小段高度，不贴满整条边",
       30 <= webchat_dock.DockBar.HANDLE_H <= 120
       and "_handle_h" in _src_dock and "HANDLE_H" in _src_dock)
-check("贴边栏：收起态半透明（用户要的 ~15% 透明）",
-      200 <= webchat_dock.DockBar.COLLAPSED_ALPHA <= 230)
+check("贴边栏：收起态半透明（挡住的那一小块也能透出页面）",
+      225 <= webchat_dock.DockBar.COLLAPSED_ALPHA <= 245)
 check("贴边栏：半透明走 Qt 的 setWindowOpacity（自己置 WS_EX_LAYERED 会被 Qt 覆盖）",
       "setWindowOpacity" in _src_dock
       and "SetLayeredWindowAttributes" not in _src_dock)
-check("贴边栏：宽高和纵向位置用同一个缓动量一起插值（整体展开，不是先跳高再变宽）",
-      "self._k" in _src_dock and "_slide_from + (self._slide_to" in _src_dock)
+# 展开必须是**纯横向**的：用户说"侧边栏不要从中间展开吧，从左侧边缘横向内展开就行"。
+# 所以只有 _k > 0 的那一刻起高度就是满高、顶边对齐，之后只有宽度在动。
+check("贴边栏：展开是纯横向的（只有宽度在动，高度一开始就是满高）",
+      "self._k" in _src_dock and "if k <= 0.0:" in _src_dock
+      and "h = max(full_h, self._handle_h)" in _src_dock
+      and "            y = top" in _src_dock)
 
 check("用户数据没有被测试改写", SAVED == [])
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))

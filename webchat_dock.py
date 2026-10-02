@@ -27,7 +27,7 @@
 
 代价（已知、刻意接受）：Edge 不给第三方留内容区，我们**没法把页面挤窄**，
 这条栏只能盖在页面左侧。所以收起态做成了"左缘正中间一个小把手"（`EDGE_W` 宽、
-`HANDLE_H` 高，实测只遮住窗口面积的 0.4%）再加 15% 半透明，鼠标移上去才滑成整条栏
+`HANDLE_H` 高，实测只遮住窗口面积的 0.4%）再加一点半透明，鼠标移上去才**横向**滑成整条栏
 ——用户反馈"页面左侧显示不完整，会被收纳条遮挡住一部分"就是这么来的。
 
 两件踩过的坑，这里都有代码兜（都由 `_check_dock_life.py` 量过）：
@@ -90,7 +90,7 @@ class DockBar(QWidget):
     SYNC_MS = 120          # 盯父窗口尺寸的间隔（只在变化时才动手，代价极低）
     EDGE_W = 14            # 收起态留的那条窄边（逻辑像素）
     HANDLE_H = 64          # 收起态只占这么高（居中），不再贴满整条左缘
-    COLLAPSED_ALPHA = 217  # 收起态不透明度（255 的 85%，= 15% 透明）
+    COLLAPSED_ALPHA = 236  # 收起态不透明度（255 的 92.5%，= 7.5% 透明）
     SLIDE_MS = 16          # 滑出/滑回的动画步长
     SLIDE_DUR = 0.18       # 滑出/滑回的时长（秒），和桌宠其他折叠动画一个手感
 
@@ -255,8 +255,12 @@ class DockBar(QWidget):
         收起态**只占中间一小段高度**（`HANDLE_H`），不再贴满整条左缘 ——
         用户反馈"页面左侧显示不完整，会被收纳条遮挡住一部分"，而 Edge 不给
         第三方留内容区，我们没法把页面挤窄，只能让自己少占地方。
-        展开时宽、高、纵向位置用同一个缓动量 `_k` 一起插值，所以是一个整体的
-        "从左缘中间展开成一条栏"，不会出现先跳高再变宽。
+
+        **展开是纯横向的**：只要开始展开（`_k > 0`），高度立刻就是满高、顶边对齐，
+        之后只有宽度在动。早先版本把高度和纵向位置也一起插值，看起来是"从左缘
+        正中间往上下撑开"，用户说"侧边栏不要从中间展开吧，从左侧边缘横向内展开
+        就行"。那一下高度切换发生在宽度还只有 `EDGE_W`（21px）、而且半透明的时候，
+        基本看不见。
         """
         box = self._client_box()
         if box is None:
@@ -264,10 +268,15 @@ class DockBar(QWidget):
         top, full_h = box
         k = max(0.0, min(1.0, self._k))
         w = self._edge_w + (self._full_w - self._edge_w) * k
-        h = self._handle_h + (max(full_h, self._handle_h) - self._handle_h) * k
-        w, h = max(self._edge_w, int(round(w))), max(1, int(round(h)))
+        w = max(self._edge_w, int(round(w)))
         self._w = w
-        y = top + int(round((max(full_h, h) - h) / 2.0))
+        if k <= 0.0:
+            h = self._handle_h                  # 收起到位：左缘中间那个小把手
+            y = top + int(round((max(full_h, h) - h) / 2.0))
+        else:
+            h = max(full_h, self._handle_h)     # 一开始展开就是满高，只有宽在动
+            y = top
+        h = max(1, int(h))
         try:
             _u.SetWindowPos(ctypes.c_void_p(int(self.winId())),
                             ctypes.c_void_p(_HWND_TOP),
