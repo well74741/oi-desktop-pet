@@ -175,11 +175,55 @@ def dock_mode():
 
 
 def dock(create=True):
+    """贴边栏单例。**顺手检查它是不是已经被系统连带销毁了。**
+
+    贴边栏是浏览器窗口的子窗口，而 Win32 的规则是父窗口销毁时**连带销毁所有
+    子窗口** —— 用户把网页窗口一关，我们这个 Qt widget 的原生句柄就被浏览器
+    带走了，之后再 `attach_to` 永远失败（实测 `_check_dock_life.py`：
+    `alive=False parent=None`）。这正是用户说的"都关闭之后再次打开，没有带
+    侧边栏的主窗口了"。所以这里发现尸体就换一个新的。
+    """
     global _DOCK
+    if _DOCK is not None and _DOCK.is_dead():
+        try:
+            _DOCK.forget_native()     # 别让 Qt 的析构去 DestroyWindow 一个废句柄
+            _DOCK.deleteLater()
+        except Exception:
+            pass
+        _DOCK = None
     if _DOCK is None and create:
         from webchat_dock import DockBar
         _DOCK = DockBar()
     return _DOCK
+
+
+def drop_dock():
+    """丢掉当前贴边栏（不管它死活），下次 dock() 会造一个全新的。
+
+    挂接失败的兜底：一个**全新**的 DockBar 挂接是走通过的路径，所以宁可重建，
+    也不能让用户落到"窗口开着但没有侧边栏、什么都点不了"的地步。
+    """
+    global _DOCK
+    d, _DOCK = _DOCK, None
+    if d is None:
+        return
+    try:
+        if d.is_dead():
+            d.forget_native()
+        else:
+            d.detach()
+        d.deleteLater()
+    except Exception:
+        pass
+
+
+def _on_screen(hwnd):
+    """窗口是不是已经摆在屏幕上了（不是 --hide 开出来的 -32000 那个坐标）。"""
+    import webchat_launcher as L
+    if not L.window_alive(hwnd) or not L.window_visible(hwnd):
+        return False
+    r = L.window_rect(hwnd)
+    return bool(r) and r[0] > -10000 and r[1] > -10000
 
 
 def attach_dock(hwnd, near=None):
@@ -189,15 +233,35 @@ def attach_dock(hwnd, near=None):
     负责把它摆到容器上；贴边栏模式下没有宿主了，没人管它就停在 (-32000,-32000)
     那个"最小化"坐标上，窗口等于看不见（第一版就栽在这，而且断言只比了相对位置
     所以还"通过"了）。
+
+    **切站点要"就地换内容"**：拿上一个窗口的矩形摆新窗口，再把别的藏掉，
+    这样看起来是同一个窗口换了页面，而不是又弹出来一个（用户反馈）。
     """
     import webchat_launcher as L
     if not hwnd:
         return False
-    L.restore_browser(hwnd, near=near)
+    d = dock()
+    # 上一个窗口的矩形 —— 新窗口就摆在这儿，视觉上等于原地换页
+    prev = getattr(d, "parent_hwnd", lambda: None)()
+    prev_rect = None
+    if prev and prev != hwnd and L.window_alive(prev) and L.window_visible(prev):
+        prev_rect = L.window_rect(prev)
+    if prev_rect:
+        L.place_browser(hwnd, prev_rect)
+    elif not _on_screen(hwnd):
+        # 只有"还没摆过"的窗口才摆。已经在屏上的别动它 —— 点当前站点那个方块
+        # 会走到这儿，restore_browser 会按 compute_placement 把窗口重新居中，
+        # 等于用户点一下自己正在用的模型、窗口就跳一下。
+        L.restore_browser(hwnd, near=near)
     L.show_browser(hwnd)
     L.focus_browser(hwnd)
-    d = dock()
     ok = d.attach_to(hwnd)
+    if not ok:
+        # 挂接失败：旧的那个要么是尸体、要么状态坏了。换一个全新的再来一次。
+        drop_dock()
+        d = dock()
+        ok = d.attach_to(hwnd)
+    L.hide_others(hwnd)          # 只留当前这一个窗口可见
     try:
         d.bar.refresh_active()
     except Exception:

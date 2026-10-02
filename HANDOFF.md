@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.31 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.32 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -167,6 +167,43 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.32：贴边栏的「切站点弹新窗口 / 关掉就再也没有侧边栏 / 收起是硬裁一条」2026-10-02】
+  - 用户反馈三条，都复现了，`_check_dock_life.py` 跑在**改之前**的代码上：
+    `切站点后上一个窗口已经藏起来 FAIL（甲站 visible=True / 乙站 visible=True）`、
+    `重新打开后又有贴边栏了 FAIL（alive=False parent=None）`、
+    `收起态 FAIL（窗口宽 15 / 栏宽 63 / 栏可见 True）`。
+  - ① **切模型会弹出新页面**：贴边栏模式每个站点各自一个顶层窗口，而
+    `attach_dock` 只管把新窗口显示出来，**忘了把上一个藏掉**——旧宿主架构里
+    这件事是 `WebChatHost._reveal` 做的（`L.hide_browser(h)`），搬到贴边栏时漏了。
+    修：新增 `L.hide_others(keep)`；并且新窗口**摆到上一个窗口的矩形上**
+    （`L.place_browser`），视觉上就是同一个窗口换了页面，而不是又弹一个。
+    顺带修了一个连带问题：点**当前正在用**的那个站点时会走 `restore_browser`，
+    它按 `compute_placement` 重新居中 = 窗口无故跳一下；现在已经在屏上的窗口不动
+    （`_on_screen`）。
+  - ② **全关之后再打开就没有侧边栏了** —— 根因是 Win32 的一条硬规则：
+    **父窗口销毁时连带销毁所有子窗口**。贴边栏是浏览器窗口的子窗口，用户一关
+    网页窗口，我们那个 Qt widget 的原生句柄就被浏览器带走了，Qt 这边毫不知情，
+    之后所有 `SetParent` 都是对废句柄操作、静默失败。
+    探针还抓到**第二种结局**：如果 `_sync` 抢在销毁之前跑了 `detach()`，句柄能活
+    下来，但 `detach` 当时只调了 `SetParent(None)`、没还原样式，留下一个
+    "WS_CHILD 但没有父窗口"的怪状态，再挂一样失败（`alive=True parent=None`）。
+    **两种结局表现完全一样（没有侧边栏），所以必须都修**：
+    `is_dead()` + `forget_native()` 认尸体，`dock()` 发现就换新的；`detach()` 改成
+    `_reparent` 的严格逆操作（清 `WS_CHILD`、补回 `WS_POPUP`）；再加 `drop_dock()`
+    做兜底——挂接失败就整个重建，一个全新的 DockBar 是走通过的路径。
+    连跑两轮探针**正好各撞上一种结局**，两轮都 19/19。
+  - ③ **收起态是硬裁一条**：原来是把全宽的栏钉在 x=0，靠窗口只有 10px 宽去裁，
+    露出来的是半个按钮——"显示也不完整"。改成整条栏**滑进滑出**
+    （`bar.x = w - full_w`，这才是抽屉该有的动画），收到位就隐藏，窄边由
+    `paintEvent` 自己画一个把手（稍亮的圆角片 + 一道亮色竖纹）。
+    缓动复用 `bubble_ui.ease_in_out`，和桌宠其他折叠动画同一条曲线。
+    窄边 10px → 14px（逻辑像素），太细了点不到。
+    第一版把手画了"上下两个小箭头"，渲染出来看是两个看不懂的碎 `>`，删掉了
+    ——**21px 宽的条上只放得下一个元素**。
+  - 教训：这次是**先写探针复现、再动手**，三条反馈一条不落地变成了可执行断言；
+    而且探针跑两轮撞出了同一个 bug 的两种结局，只修其中一种就会"有时候好有时候
+    坏"。`test_webchat` 加了 13 条静态断言守接线（81 → 94 项）。
 
 - 【v0.9.31：装不上的**真正根因** —— 被桌宠启动的程序继承了安装目录 2026-10-02】
   - 用户反馈："似乎无法关闭进程。事实上我退出了旧版的桌宠，任务管理器里也没找到
@@ -1887,6 +1924,7 @@ python -u _check_launch_cwd.py                     # 手动：真起子进程验
 #   from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
 #   CArchiveReader(exe).extract('PYZ.pyz') → 落盘 → ZlibArchiveReader(...).extract('模块名')
 #   → marshal.loads → 递归看 co_names/co_varnames/co_consts 里有没有你的新函数名
+python -u _check_dock_life.py                      # 手动：贴边栏切站点/窗口被关掉/收起态（19 项，临时 profile，跑完即删）
 python -u _check_dock.py                           # 手动：贴边栏挂进真实 Edge 窗口验真（17 项，临时 profile，跑完即删）
 python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（25 项，临时 profile，跑完即删）
 python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位

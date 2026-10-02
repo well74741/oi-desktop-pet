@@ -523,6 +523,47 @@ _src_wl2 = open(os.path.join(HERE_WL, "webchat_launcher.py"),
 check("贴边栏：restore_browser 会处理最小化并重新摆位",
       "IsIconic" in _src_wl2 and "compute_placement(near" in _src_wl2)
 
+# ---------- 贴边栏：切站点 / 窗口被关掉 / 收起态 ----------
+# 对应用户反馈：切模型会弹出新页面、全关之后再开就没有侧边栏了、收起是硬裁一条。
+# 真实窗口行为由 _check_dock_life.py 验（19 项，要起浏览器）；这里守接线。
+_src_ui2 = open(os.path.join(HERE_WL, "webchat_ui.py"), encoding="utf-8").read()
+_blk_at = _src_ui2[_src_ui2.index("def attach_dock("):]
+
+check("贴边栏：切站点时把别的网页窗口藏起来（否则每切一次多一个顶层窗口）",
+      callable(getattr(L, "hide_others", None))
+      and "hide_others(hwnd)" in _blk_at)
+check("贴边栏：切站点是就地换内容（新窗口摆到上一个窗口的矩形上）",
+      callable(getattr(L, "place_browser", None))
+      and "place_browser(hwnd, prev_rect)" in _blk_at)
+check("贴边栏：已经在屏上的窗口不再 restore（点当前站点不该让窗口跳一下）",
+      "_on_screen(hwnd)" in _blk_at)
+
+# 父窗口销毁会连带销毁子窗口 —— 这是"再次打开没有侧边栏"的根因
+check("贴边栏：能判断自己的原生窗口是不是已被系统连带销毁",
+      callable(getattr(webchat_dock.DockBar, "is_dead", None)))
+check("贴边栏：dock() 发现尸体会换一个新的",
+      "is_dead()" in _src_ui2 and "_DOCK = None" in _src_ui2)
+check("贴边栏：挂接失败有「整个重建」的兜底（不能让用户没有侧边栏）",
+      callable(getattr(webchat_ui, "drop_dock", None))
+      and "drop_dock()" in _blk_at)
+check("贴边栏：detach 是 _reparent 的逆操作（清 WS_CHILD 补回 WS_POPUP）",
+      "_WS_CHILD) | _WS_POPUP" in _src_dock)
+check("贴边栏：父窗口没了就停手，不对废句柄继续操作",
+      "forget_native" in _src_dock)
+check("贴边栏：能报出自己挂在哪个窗口上（切站点要拿它的矩形）",
+      callable(getattr(webchat_dock.DockBar, "parent_hwnd", None)))
+
+# 收起态：不能是"把全宽的栏硬裁一条"
+check("贴边栏：收起时整条栏滑出去并隐藏，不是被窗口裁掉半个按钮",
+      "self.bar.setGeometry(w - self._full_w" in _src_dock
+      and "setVisible(show_bar)" in _src_dock)
+check("贴边栏：窄边自己画把手（收起态是常态，要看着是刻意设计的一条边）",
+      "def paintEvent" in _src_dock and "drawRoundedRect" in _src_dock)
+check("贴边栏：滑出/滑回是动画，缓动用桌宠统一那条曲线",
+      "ease_in_out" in _src_dock and "_slide_tick" in _src_dock)
+check("贴边栏：窄边宽度够点得到，也不至于挡住页面",
+      10 <= webchat_dock.DockBar.EDGE_W <= 28)
+
 check("用户数据没有被测试改写", SAVED == [])
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:

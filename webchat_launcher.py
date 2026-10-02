@@ -459,6 +459,47 @@ def restore_browser(hwnd, near=None):
         return False
 
 
+def place_browser(hwnd, rect):
+    """把网页窗口摆到指定矩形上（切站点时拿上一个窗口的矩形来"就地换内容"）。
+
+    贴边栏模式下每个站点是**各自一个窗口**，不摆的话新窗口会按
+    `compute_placement` 落在别处 —— 用户看到的就是"切模型弹出了个新页面"。
+    摆到同一个矩形上，再把上一个藏掉，才像标签页那样原地换内容。
+    """
+    if not rect:
+        return False
+    try:
+        u, ctypes, wt = _win32()
+        SW_RESTORE = 9
+        if u.IsIconic(ctypes.c_void_p(hwnd)):
+            u.ShowWindow(ctypes.c_void_p(hwnd), SW_RESTORE)
+        x, y, w, h = (int(v) for v in rect[:4])
+        SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
+        u.SetWindowPos(ctypes.c_void_p(hwnd), None, x, y, w, h,
+                       SWP_NOZORDER | SWP_NOACTIVATE)
+        return True
+    except Exception:
+        return False
+
+
+def hide_others(keep):
+    """把除 `keep` 以外所有由桌宠打开的网页窗口藏起来（**不关**）。
+
+    旧架构里这件事是宿主 `_reveal` 做的；贴边栏模式没有宿主，一开始漏了，
+    结果每切一次模型就多一个顶层窗口摊在桌面上（用户反馈"切换其他模型会
+    弹出新页面"）。不关的理由见 `hide_browser`：切回去是瞬间的，页面状态和
+    写了一半的提问都还在，就是标签页。
+    """
+    n = 0
+    for _key, h in list(_tracked().items()):
+        if h == keep:
+            continue
+        if window_visible(h):
+            hide_browser(h)
+            n += 1
+    return n
+
+
 def window_visible(hwnd):
     """窗口当前是不是显示着的（被 SW_HIDE 藏起来的返回 False）。
 
