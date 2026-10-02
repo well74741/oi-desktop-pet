@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.30 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.31 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -104,7 +104,8 @@
 2. 编译检查：`python -m py_compile <改动文件>`
 3. **跑测试：`python run_all_tests.py`** —— 自动发现并跑完所有 `test_*.py`
    （目前 9 个套件、约 10 秒），有一个不过就别往下走。
-   真实浏览器/几何的手动验证另算：`_check_host.py`、`_check_chatpanel.py`
+   真实浏览器/几何的手动验证另算：`_check_host.py`、`_check_chatpanel.py`、
+   `_check_launch_cwd.py`
 4. 发新版：改 `module_core.APP_VERSION`（小版本递增，别覆盖旧版本号），其余自动
 5. 重启桌宠：在当前工作区执行 `.\启动桌宠.bat`
 6. 打包：`build.bat`（Python 3.12 venv + PyInstaller 6.21）。
@@ -166,6 +167,44 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.31：装不上的**真正根因** —— 被桌宠启动的程序继承了安装目录 2026-10-02】
+  - 用户反馈："似乎无法关闭进程。事实上我退出了旧版的桌宠，任务管理器里也没找到
+    进程，但是新版安装包无法安装。" 截图里 Restart Manager 点名的占用者是
+    **Adobe Photoshop 2020**，报错仍是
+    `C:\Program Files\oi桌宠\_internal\VCRUNTIME140.dll … DeleteFile failed; code 5`。
+  - **v0.9.30 没解决问题，因为方向错了**：它做的三道保险全是"让旧版桌宠退出"，
+    而占用者根本不是桌宠。这条教训值钱 —— "退出旧版"是最顺手的假设，用户
+    "任务管理器里找不到桌宠"这句话本来就已经否掉它了，我当时没听进去。
+  - 真实链条（根因在**我们**身上，不是 Photoshop 的锅）：
+    1. 桌宠跑在 `C:\Program Files\oi桌宠\`，进程的当前目录（CWD）就是那里；
+    2. 径向菜单 / 启动器组件用 `subprocess.Popen` 和 `os.startfile` 起外部程序，
+       **没传 `cwd`** —— 子进程默认**继承父进程的 CWD**；
+    3. Windows 的 **DLL 搜索顺序包含当前目录**。Photoshop 一启动找
+       `VCRUNTIME140.dll`，就在"当前目录"也就是我们的 `_internal\` 里撞见一份，
+       加载它，然后**一直握着这个文件句柄**；
+    4. 于是只要用户曾经用桌宠启动过任何依赖 VC 运行时的程序，那个程序就把我们
+       自己的安装文件锁死了 —— 桌宠自己早退出了也没用。
+  - 修法：所有启动外部程序的地方都显式指定工作目录，**绝不把安装目录传下去**。
+    - `pet_gravity.py`：加 `RadialMenu._launch_cwd(path)`（优先目标程序自己的
+      目录，不是文件路径就退到用户主目录），`_launch` 里 4 个 `Popen` 全带
+      `cwd=cwd`；`os.startfile` 没有 `cwd` 参数，用 `_startfile_outside(path, cwd)`
+      包成"临时 chdir → startfile → chdir 回来"。
+    - `widgets/launcher.py`：加 `_safe_cwd(path)`，`_open()` 同样处理。
+    - `webchat_launcher.py`：起浏览器也传 `cwd=` 浏览器自己的目录 —— 浏览器同样
+      会加载 VC 运行时，同样会占住。
+  - `.iss` **这版没动**。查过 Inno 文档后确认：`PrepareToInstall`
+    "is called **before** Setup checks for files being in-use if CloseApplications
+    is set to yes" —— 所以本来想加的"文件被占用就友好提示"探针放在那里会在
+    Restart Manager 出手**之前**误报。v0.9.30 的 Restart Manager 其实工作正常
+    （它准确点名了 Photoshop），安装包侧已经够了，不用再加东西。
+  - 验证：`_check_launch_cwd.py`（9 项）真的起一个子进程问它自己的 CWD，关键是
+    **带反面对照** —— 不传 `cwd` 时断言子进程确实继承到了假安装目录，证明这个坑
+    是真的存在、而不是我在修一个想象出来的 bug。另在 `test_settings_sync` 加 5 条
+    静态断言守住"每个启动点都带 cwd"，防以后新增启动点时漏掉。
+  - **对已经卡住的那次安装**：我们的修复只能防复发，解不开 Photoshop 此刻已经
+    握着的句柄 —— 用户需要把 Photoshop 关一次再装（或者在 Restart Manager
+    那一页让它关）。
 
 - 【v0.9.30：安装包能强制退出旧版（装新版不再报"文件被占用"）2026-10-02】
   - 用户实测：退出旧版后装新版，仍在 `_internal\VCRUNTIME140.dll` 上报
@@ -1839,10 +1878,15 @@ python -u test_components_scale.py                 # 组件缩放回归测试
 python -u test_templates.py                        # 模块模板验证（111 项，新增模板必跑）
 python -u test_webchat.py                          # 聚合AI：站点/摆位/粘住/切换/内缩/不阻塞/不空白/贴边栏（81 项）
 python -u test_pet_anim.py                         # 倾角动画 + 空盘开合 + 提示排版 + 悬停提示 + 动图暂停（50 项）
-python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性 + 托盘 + 安装包占用（33 项，沙箱隔离）
+python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性 + 托盘 + 安装包占用 + 启动程序不漏工作目录（38 项，沙箱隔离）
 python -u test_autostart.py                        # 开机自启读写与自愈（19 项，沙箱注册表键）
 python -u test_data_store.py                       # 原子写 + 每日滚动快照（13 项）
 python -u test_geometry.py                         # 几何不变式：三档 × 不出框/同中线/标题滚动/画布工具栏/弹窗摆位（71 项）
+python -u _check_launch_cwd.py                     # 手动：真起子进程验「被桌宠启动的程序不继承安装目录」（9 项，只起 cmd.exe，含反面对照）
+# 验「我的改动真的打进 exe 了」—— 别用字节搜索（PyInstaller 的 PYZ 是逐模块 zlib 压的，搜不到）：
+#   from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
+#   CArchiveReader(exe).extract('PYZ.pyz') → 落盘 → ZlibArchiveReader(...).extract('模块名')
+#   → marshal.loads → 递归看 co_names/co_varnames/co_consts 里有没有你的新函数名
 python -u _check_dock.py                           # 手动：贴边栏挂进真实 Edge 窗口验真（17 项，临时 profile，跑完即删）
 python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（25 项，临时 profile，跑完即删）
 python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位

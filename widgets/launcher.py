@@ -71,22 +71,55 @@ class Widget(ModuleWidget):
             self._lay.addLayout(row)
         self._lay.addStretch(1)
 
+    @staticmethod
+    def _safe_cwd(path=""):
+        """被启动的程序用哪个工作目录 —— **不能是桌宠的安装目录**。
+
+        子进程继承 CWD，而 Windows 的 DLL 搜索顺序会查当前目录：被启动的程序
+        可能从桌宠的 _internal 目录里加载 VCRUNTIME140.dll 这类公共运行时并一直
+        占着文件句柄，导致装新版时替换不了那个 DLL（实测占用者是从桌宠启动的
+        Photoshop，而不是桌宠自己）。和 pet_gravity._launch_cwd 是同一件事。
+        """
+        try:
+            q = str(path or "")
+            if q and os.path.isfile(q):
+                d = os.path.dirname(os.path.abspath(q))
+                if d and os.path.isdir(d):
+                    return d
+            home = os.path.expanduser("~")
+            return home if os.path.isdir(home) else None
+        except Exception:
+            return None
+
     def _open(self, path):
         try:
             p = str(path or "").strip()
             if not p:
                 return
+            cwd = self._safe_cwd(p)
             if p.startswith(("http://", "https://")):
                 webbrowser.open(p)
             elif p.lower().endswith((".exe", ".bat", ".cmd")):
-                subprocess.Popen([p], shell=True)
+                subprocess.Popen([p], shell=True, cwd=cwd)
             elif os.path.isdir(p):
-                subprocess.Popen(["explorer", p])
+                subprocess.Popen(["explorer", p], cwd=cwd)
             elif os.path.exists(p):
-                os.startfile(p) if sys.platform == "win32" else subprocess.Popen([p])
+                if sys.platform == "win32":
+                    _old = os.getcwd()
+                    try:
+                        if cwd:
+                            os.chdir(cwd)
+                        os.startfile(p)
+                    finally:
+                        try:
+                            os.chdir(_old)
+                        except Exception:
+                            pass
+                else:
+                    subprocess.Popen([p], cwd=cwd)
             else:
                 # 系统命令（notepad/calc 等）
-                subprocess.Popen([p], shell=True)
+                subprocess.Popen([p], shell=True, cwd=cwd)
         except Exception:
             pass
 

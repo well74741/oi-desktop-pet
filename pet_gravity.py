@@ -2361,31 +2361,77 @@ class RadialMenu(QWidget):
                 self.setWindowOpacity(1.0)
                 self._animating = False
 
+    @staticmethod
+    def _launch_cwd(path=""):
+        """被启动的程序该用哪个工作目录。
+
+        **绝不能让它继承桌宠的工作目录**（安装目录）。子进程继承 CWD，而 Windows
+        的 DLL 搜索顺序会查当前目录——于是被启动的程序可能从
+        `C:\\Program Files\\oi桌宠\\_internal\\` 里加载 `VCRUNTIME140.dll` 之类的
+        公共运行时，并一直占着那个文件句柄。后果是**装新版时替换不了那个 DLL**，
+        报 "DeleteFile failed; code 5 拒绝访问"：用户实测占用者是从径向菜单启动的
+        Adobe Photoshop，不是桌宠自己（所以任务管理器里找不到桌宠也照样装不上）。
+
+        有可执行文件路径就用它自己所在的目录（程序本来就期望这样被启动），
+        否则退到用户主目录——总之不是我们的安装目录。
+        """
+        try:
+            p = str(path or "")
+            if p and os.path.isfile(p):
+                d = os.path.dirname(os.path.abspath(p))
+                if d and os.path.isdir(d):
+                    return d
+            home = os.path.expanduser("~")
+            return home if os.path.isdir(home) else None
+        except Exception:
+            return None
+
     def _launch(self, path):
         path = str(path or "")
         if not path:
             self.hide_menu()
             return
+        cwd = self._launch_cwd(path)
         try:
             if path.startswith("run://"):
                 # 命令按钮：run:// 后面的内容交给 shell 执行
                 subprocess.Popen(path[len("run://"):].lstrip("/"), shell=True,
-                                 creationflags=0x08000000)
+                                 creationflags=0x08000000, cwd=cwd)
             elif path.lower().startswith(("http://", "https://", "mailto:", "tel:")):
                 webbrowser.open(path)
             elif os.path.exists(path) and os.path.splitext(path)[1].lower() in (".py", ".pyw"):
-                subprocess.Popen([sys.executable, path])
+                subprocess.Popen([sys.executable, path], cwd=cwd)
             elif os.path.exists(path):
-                os.startfile(path)
+                # os.startfile 没有 cwd 参数：临时把进程的当前目录切到目标那边，
+                # 启动完立刻切回来（不切的话 ShellExecute 起的程序照样继承我们的）
+                self._startfile_outside(path, cwd)
             else:
                 # 命令行 或 自定义脚本：走 shell
-                subprocess.Popen(path, shell=True, creationflags=0x08000000)
+                subprocess.Popen(path, shell=True, creationflags=0x08000000,
+                                 cwd=cwd)
         except Exception:
             try:
-                subprocess.Popen(path, shell=True, creationflags=0x08000000)
+                subprocess.Popen(path, shell=True, creationflags=0x08000000,
+                                 cwd=cwd)
             except Exception:
                 logger.exception("Failed to launch: %s", path)
         self.hide_menu()
+
+    @staticmethod
+    def _startfile_outside(path, cwd):
+        """用 os.startfile 启动，但让它的工作目录是 `cwd` 而不是我们的安装目录。"""
+        old = None
+        try:
+            if cwd and os.path.isdir(cwd):
+                old = os.getcwd()
+                os.chdir(cwd)
+            os.startfile(path)
+        finally:
+            if old is not None:
+                try:
+                    os.chdir(old)
+                except Exception:
+                    pass
 
     def _reshow_menu(self):
         if hasattr(self, '_pending_sc') and self._pending_sc:

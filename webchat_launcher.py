@@ -872,7 +872,13 @@ def open_site(site, size=None, timeout=20.0):
             "--window-size=%d,%d" % (max(200, round(w / s)),
                                      max(200, round(h / s)))]
     try:
-        subprocess.Popen(args, creationflags=0x08000000)
+        # cwd 不能留给它继承我们的安装目录：浏览器会按 DLL 搜索顺序查当前目录，
+        # 可能从 `_internal\` 里拿 VCRUNTIME140.dll 之类的公共运行时并占住句柄，
+        # 之后装新版就替换不了那个文件（报 DeleteFile failed; code 5）。
+        # 用浏览器自己所在的目录——它本来就期望这样被启动。
+        _cwd = os.path.dirname(os.path.abspath(exe)) if exe else None
+        subprocess.Popen(args, creationflags=0x08000000,
+                         cwd=_cwd if _cwd and os.path.isdir(_cwd) else None)
     except Exception as e:
         return (False, "启动浏览器失败：%s" % e, None)
 

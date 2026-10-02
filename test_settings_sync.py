@@ -186,6 +186,34 @@ except Exception:
     pass
 app.processEvents()
 shutil.rmtree(SAND, ignore_errors=True)
+# ---------- 启动外部程序时不许把桌宠目录传下去 ----------
+# 这是"装新版报 DeleteFile failed; code 5"的**真正根因**：子进程继承 CWD，
+# Windows 的 DLL 搜索顺序会查当前目录，于是被桌宠启动的程序（用户实测是
+# Photoshop）从 C:\Program Files\oi桌宠\_internal\ 里加载了 VCRUNTIME140.dll
+# 并一直占着句柄 —— 所以"任务管理器里找不到桌宠"也照样装不上，占用者不是桌宠。
+_pg_src = open(os.path.join(HERE, "pet_gravity.py"), encoding="utf-8").read()
+_lb = _pg_src[_pg_src.index("    def _launch(self, path):"):
+              _pg_src.index("    def _reshow_menu")]
+check("启动程序：径向菜单每个 Popen 都带 cwd（%d 个 Popen / %d 个 cwd=）"
+      % (_lb.count("subprocess.Popen("), _lb.count("cwd=cwd")),
+      _lb.count("subprocess.Popen(") > 0
+      and _lb.count("cwd=cwd") >= _lb.count("subprocess.Popen("))
+check("启动程序：os.startfile 也被包成「临时切目录再切回」",
+      "_startfile_outside" in _pg_src)
+check("启动程序：给出的工作目录不会是桌宠自己的目录",
+      os.path.normcase(G.RadialMenu._launch_cwd(
+          os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                       "System32", "cmd.exe")) or "")
+      == os.path.normcase(os.path.join(
+          os.environ.get("SystemRoot", r"C:\Windows"), "System32")))
+_wl_src = open(os.path.join(HERE, "webchat_launcher.py"), encoding="utf-8").read()
+check("启动程序：起浏览器也传了 cwd（浏览器同样会占住 DLL）",
+      "cwd=_cwd" in _wl_src)
+_lc_src = open(os.path.join(HERE, "widgets", "launcher.py"),
+               encoding="utf-8").read()
+check("启动程序：启动器组件用同一套安全工作目录",
+      "_safe_cwd" in _lc_src and _lc_src.count("cwd=cwd") >= 3)
+
 # ---------- 安装包能强制退出旧版（装新版不再报"文件被占用"） ----------
 # 用户实测：退出旧版后装新版，仍报 _internal\VCRUNTIME140.dll
 # "DeleteFile failed; code 5 拒绝访问"。根因是 CloseApplications=no，
