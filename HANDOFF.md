@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.35 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.36 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -167,6 +167,41 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.36：清掉一个 102 行的死方法（里面还藏着个永远没触发的 bug）2026-10-02】
+  - 用户："检查一下有没有多余的代码和文件。"下面是查到的，以及**做了哪些、没做哪些**。
+  - **删了 `StatusBubble._relayout`（bubble_ui.py，102 行）**。它被
+    `StatusBubbleLayout._relayout`（bubble_layout.py:763）**完整覆盖且不回调
+    `super()`**，而全项目只在 `pet_gravity.py:6824 / 7888` 两处造气泡、造的都是
+    子类 —— 所以基类那份根本不可达。
+    证据不止静态分析：那 102 行里**藏着一个 `UnboundLocalError`** ——
+    `width` 在 3815、3832 行被用，却到 3838 行才赋值。只要走到带组件的行
+    （计算器/便签/画布…）就必炸。**它从没炸过，正好反证没人走到这儿。**
+    删完 pyflakes 的两条 `undefined name 'width'` 随之消失。
+    验证：两个解释器 9 套件全过；`_check_chatpanel.py` 正常；另跑了一个冒烟
+    —— 用**真的计算器组件**做组件行调 `_relayout`，`_full_h` 从 120（行被跳过）
+    变成 403（真排进去了）、无异常、可重入，解析到的确实是子类那份。
+  - **删了两份事故残渣**：`pet_settings.json.polluted_by_test_151759`（9/26）、
+    `pet_settings.json.probe_overwrote_171700`（9/28）—— 当年测试/探针写坏真实
+    设置时留的抢救副本。删前确认现用 `pet_settings.json` 与 `.bak` 15 个键、内容
+    完全一致。
+  - **查到但按用户意思没动的**（留给下一个人，别重复踩）：
+    - **57 处未用导入**。⚠️ **`status_monitor.py` 里有 19 条是故意的再导出**
+      （拆 `bubble_ui.py` 时留的兼容层），`test_bubble.py:37` 正在断言
+      `status_monitor.ChatPanel is ChatPanel` —— **删了会红**。pyflakes 报
+      status_monitor 36 条，只有 17 条是真没用的。
+    - `main.py:115` 的 `app = QApplication(...)` 看着没用，**不能删**：
+      `QMessageBox` 需要一个活着的 QApplication 引用。pyflakes 这条是误报。
+    - 6 个没用的局部变量（canvas.py 的 `nc`/`w`，pet_gravity 里 4 个
+      `except ... as e` 没用到 `e`）。
+    - `webchat_dock.py` 模块注释里引用的 `_probe_rp2.py` **已不存在**（现在的
+      验收脚本是 `_check_dock.py` / `_check_dock_life.py` / `_check_dock_drag.py`）。
+    - 磁盘：78 个备份 zip 共 **41MB**（`_make_backup.py` 从不清理，
+      `_prune_dist.py` 只管 dist）；`dist/`142MB + `build_out/`65MB + `build/`11MB。
+      `dist/` 里还混着便携版当年跑出来的**用户数据**（`pet_settings.json` 含 API
+      Key）—— 已被 `.gitignore` 的 `pet_settings.json*` 挡住、没进库。
+    - `build_mac.sh`（全是 Win32 调用的 Windows 桌宠带着 mac 打包脚本）、
+      `画布方案.md`（画布早已做完并反复改过的设计稿）、`oi/`（空目录）。
 
 - 【v0.9.35：离开即收、收起态再透一截、圆角改成裁窗口；并量清了"拖动迟滞"是谁的锅 2026-10-02】
   - 用户三条：①"鼠标离开侧边栏就立即收起，不用延迟收起"；②"收纳后的竖条和背景
