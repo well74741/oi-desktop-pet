@@ -31,7 +31,6 @@ from PyQt5.QtWidgets import (QApplication, QHBoxLayout, QLabel, QLineEdit,
 
 from widgets import kit
 
-
 # ==================== 定位辅助 ====================
 
 def pet_rect_of(widget):
@@ -96,6 +95,10 @@ class _Opener(QObject):
 
     def _on_done(self, ok, err, finished):
         self._busy = False
+        if not ok:
+            h = host(create=False)
+            if h is not None:
+                h.set_loading("")   # 开失败了，别让提示一直转
         if ok:
             import webchat_launcher as L
             _name, hwnd = L.active()
@@ -127,6 +130,9 @@ def open_site_ui(site, near=None, finished=None):
         h.show()
     h.raise_()
     h.activateWindow()
+    # 浏览器起来要一秒多，这期间容器是纯色的——先亮一条加载提示，
+    # 否则看着像打不开（用户反馈"等了很久，加载时画面是空白的"）
+    h.set_loading(str((site or {}).get("name") or ""))
     return opener().open(site, h.holder_size(), finished)
 
 
@@ -489,7 +495,12 @@ class WebChatSidebar(QWidget):
 
 
 class _Holder(QWidget):
-    """网页容器：一个有真实 HWND 的空控件，浏览器窗口就挂在它下面。"""
+    """网页容器：一个有真实 HWND 的空控件，浏览器窗口就挂在它下面。
+
+    网页没就位时它自己画一条加载提示——浏览器那一秒多里容器是纯色的，
+    什么都不说的话看着就像"卡住了 / 打不开"（用户反馈"等了很久，加载时画面
+    是空白的"）。
+    """
 
     def __init__(self, host):
         super().__init__(host)
@@ -498,6 +509,58 @@ class _Holder(QWidget):
         self.setAttribute(Qt.WA_DontCreateNativeAncestors, True)
         self.setProperty("oi_nozoom", True)
         self.setStyleSheet("background:#14181f;")
+        self._loading = ""          # 非空 = 正在加载，显示的是站点名
+        self._phase = 0
+        self._spin = QTimer(self)
+        self._spin.setInterval(120)
+        self._spin.timeout.connect(self._tick_spin)
+
+    def set_loading(self, name):
+        """name 非空 = 开始显示加载提示；空字符串 = 收起。"""
+        name = str(name or "")
+        if name == self._loading:
+            return
+        self._loading = name
+        if name:
+            self._phase = 0
+            if not self._spin.isActive():
+                self._spin.start()
+        else:
+            self._spin.stop()
+        self.update()
+
+    def _tick_spin(self):
+        self._phase = (self._phase + 1) % 12
+        self.update()
+
+    def paintEvent(self, ev):
+        super().paintEvent(ev)
+        if not self._loading:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        cx, cy = self.width() // 2, self.height() // 2
+        r = kit.ui(13)
+        # 12 格转圈：当前相位最亮，往回依次变暗
+        for i in range(12):
+            a = 40 + int(200 * (((i - self._phase) % 12) / 11.0))
+            p.save()
+            p.translate(cx, cy - kit.ui(14))
+            p.rotate(i * 30)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(140, 180, 240, 255 - a))
+            p.drawRoundedRect(-kit.ui(1), -r - kit.ui(5),
+                              kit.ui(2), kit.ui(5), kit.ui(1), kit.ui(1))
+            p.restore()
+        f = p.font()
+        f.setFamily("Microsoft YaHei")
+        f.setPixelSize(kit.ui(12))
+        p.setFont(f)
+        p.setPen(QColor(150, 167, 196))
+        p.drawText(0, cy + kit.ui(14), self.width(), kit.ui(20),
+                   Qt.AlignHCenter | Qt.AlignTop,
+                   "正在打开 %s…" % self._loading)
+        p.end()
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
@@ -563,6 +626,13 @@ class WebChatHost(QWidget):
         if vis:
             self.show()        # 改标志会重建原生窗口，得重新显示
 
+    def set_loading(self, name):
+        """容器上的加载提示（网页没就位时显示）。"""
+        try:
+            self.holder.set_loading(name)
+        except Exception:
+            pass
+
     def refit(self):
         """让网页内容正好压住容器（网页窗口是顶层窗口，得我们自己摆）。
 
@@ -627,6 +697,8 @@ class WebChatHost(QWidget):
             if not L.glue_browser(hwnd, int(self.winId())):
                 return False
             self._pages.add(hwnd)
+            # 新页面要等它对齐才显示，这段空窗也给个提示
+            self.set_loading(L.window_title(hwnd) or "网页")
         for h in list(self._pages):
             if not L.window_alive(h):
                 self._pages.discard(h)
@@ -652,6 +724,7 @@ class WebChatHost(QWidget):
                               lambda: self._reveal(hwnd, old, tries - 1))
             return
         L.show_browser(hwnd)
+        self.set_loading("")        # 页面出来了，收起加载提示
         for h in list(self._pages):
             if h != hwnd:
                 L.hide_browser(h)

@@ -107,9 +107,25 @@ try:
 
     host.refit()
     pump(0.4)
-    rw = L._find_descendant(hwnd, "Chrome_RenderWidgetHostHWND")
-    rr, hr = L.window_rect(rw), L.window_rect(holder)
+    # 等渲染子窗口出现：Chromium 的 Chrome_RenderWidgetHostHWND 是晚于窗口本身
+    # 创建的，固定 pump 0.4s 不保证它已经在了（这条断言本来就会偶发 None）。
+    # v0.9.20 给"切站点"那条断言加过同样的等待，这里漏了。
+    # 等到**真的对齐**，而不是只等矩形能读出来：产品侧本来就是靠重试/心跳
+    # 逐步收敛的（fit_browser 非阻塞、_retry_fit、_tick 兜底），所以这里该断言
+    # "会收敛"，而不是要求某个瞬间就完美。实测这条断言在旧版也会偶发失败，
+    # 就是因为只等了固定的 0.4s。
+    rw, rr, hr = None, None, None
+    _dl0 = time.monotonic() + 20
+    while time.monotonic() < _dl0:
+        host.refit()
+        rw = L._find_descendant(hwnd, "Chrome_RenderWidgetHostHWND")
+        rr = L.window_rect(rw) if rw else None
+        hr = L.window_rect(holder)
+        if rr and hr and abs(rr[0] - hr[0]) <= 2 and abs(rr[1] - hr[1]) <= 2                 and abs(rr[2] - hr[2]) <= 3 and abs(rr[3] - hr[3]) <= 3:
+            break
+        pump(0.1)
     check("网页内容正好铺满容器（标题栏被裁在外面）",
+          bool(rr) and bool(hr) and
           abs(rr[0] - hr[0]) <= 2 and abs(rr[1] - hr[1]) <= 2
           and abs(rr[2] - hr[2]) <= 3 and abs(rr[3] - hr[3]) <= 3,
           "内容=%s 容器=%s" % (rr, hr))

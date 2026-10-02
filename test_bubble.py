@@ -108,9 +108,15 @@ while time.time() < dl and p._fold_anim is not None:
     app.processEvents()
     time.sleep(0.02)
 app.processEvents()
-check("收起：动画首帧 = 点击前高度，不先跳一下（%d vs %d）"
-      % (b.wrap_heights[0] if b.wrap_heights else -1, _h_before_fold),
-      bool(b.wrap_heights) and abs(b.wrap_heights[0] - _h_before_fold) <= 1)
+# 容差按**总位移的比例**给，不卡死 1px：定时器第一拍总会比 t0 晚几毫秒，
+# 缓动那时已经走了一两像素（机器负载高时更明显，实测打包解释器上是 2px）。
+# 要守的是"没有跳"——原缺陷是首帧一下蹿 47px，和这个量级差一个数量级。
+_fold_span = abs(_h_before_fold - p.current_height())
+_fold_tol = max(3, int(_fold_span * 0.05))
+check("收起：动画首帧 ≈ 点击前高度，不先跳一下（%d vs %d，容差 %d）"
+      % (b.wrap_heights[0] if b.wrap_heights else -1, _h_before_fold, _fold_tol),
+      bool(b.wrap_heights)
+      and abs(b.wrap_heights[0] - _h_before_fold) <= _fold_tol)
 # 输入区（对话框栏）必须全程保持终局高度。以前收起态那一行摘要是等动画结束才
 # 出现的，整段动画里它的空位（约一行 + 一道间距）没人占，QVBoxLayout 就分给了
 # 可伸缩的输入区 —— "消息栏在收，输入框却一直拉伸着，最后一刻才弹回去"。
@@ -139,9 +145,13 @@ while time.time() < dl and p._fold_anim is not None:
     app.processEvents()
     time.sleep(0.02)
 app.processEvents()
-check("展开：动画首帧 = 点击前高度，不先塌一下（%d vs %d）"
-      % (b.wrap_heights[0] if b.wrap_heights else -1, _h_before_unfold),
-      bool(b.wrap_heights) and abs(b.wrap_heights[0] - _h_before_unfold) <= 1)
+_unfold_span = abs(_h_before_unfold - p.current_height())
+_unfold_tol = max(3, int(_unfold_span * 0.05))
+check("展开：动画首帧 ≈ 点击前高度，不先塌一下（%d vs %d，容差 %d）"
+      % (b.wrap_heights[0] if b.wrap_heights else -1, _h_before_unfold,
+         _unfold_tol),
+      bool(b.wrap_heights)
+      and abs(b.wrap_heights[0] - _h_before_unfold) <= _unfold_tol)
 check("展开：全程单调变高，不来回抖",
       all(b.wrap_heights[i] <= b.wrap_heights[i + 1] + 1
           for i in range(len(b.wrap_heights) - 1)))
