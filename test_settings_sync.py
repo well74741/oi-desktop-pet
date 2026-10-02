@@ -186,6 +186,36 @@ except Exception:
     pass
 app.processEvents()
 shutil.rmtree(SAND, ignore_errors=True)
+# ---------- 安装包能强制退出旧版（装新版不再报"文件被占用"） ----------
+# 用户实测：退出旧版后装新版，仍报 _internal\VCRUNTIME140.dll
+# "DeleteFile failed; code 5 拒绝访问"。根因是 CloseApplications=no，
+# 而单实例只有 QLockFile 文件锁 —— 安装程序看不见文件锁，连提示都给不出来。
+_iss = open(os.path.join(HERE, "oi桌宠.iss"), encoding="utf-8").read()
+_main_src = open(os.path.join(HERE, "main.py"), encoding="utf-8").read()
+
+check("安装包：允许关闭占用进程（CloseApplications=yes）",
+      "CloseApplications=yes" in _iss
+      and "CloseApplications=no" not in _iss)
+check("安装包：有 taskkill 兜底（托盘进程 Restart Manager 常抓不到）",
+      "taskkill.exe" in _iss and "PrepareToInstall" in _iss)
+check("安装包：卸载前也先结束进程（否则删不干净）",
+      "InitializeUninstall" in _iss)
+check("安装包：只结束自己的 exe，绝不碰 msedge（会关掉用户正在用的网页）",
+      "oi桌宠.exe" in _iss and "msedge" not in _iss.replace("绝不碰 msedge", ""))
+
+# AppMutex 的名字必须和代码里建的那个**完全一致**，否则等于没加
+import re as _re_mx
+_m = _re_mx.search(r"AppMutex=(\S+)", _iss)
+_n = _re_mx.search(r'APP_MUTEX_NAME = "([^"]+)"', _main_src)
+check("安装包：声明了 AppMutex", _m is not None)
+check("安装包：AppMutex 名字与 main.py 建的互斥体一致（%s）"
+      % (_m.group(1) if _m else "?"),
+      _m is not None and _n is not None and _m.group(1) == _n.group(1))
+check("程序侧：启动时真的建了具名互斥体（文件锁安装程序看不见）",
+      "_create_app_mutex()" in _main_src and "CreateMutexW" in _main_src)
+check("程序侧：退出时关掉互斥体句柄（不然残留会误判为仍在运行）",
+      "CloseHandle(_install_mutex)" in _main_src)
+
 print("沙箱已删除:", not os.path.exists(SAND))
 
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))

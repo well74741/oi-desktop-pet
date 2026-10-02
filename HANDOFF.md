@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.29 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.30 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -166,6 +166,35 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.30：安装包能强制退出旧版（装新版不再报"文件被占用"）2026-10-02】
+  - 用户实测：退出旧版后装新版，仍在 `_internal\VCRUNTIME140.dll` 上报
+    **"DeleteFile failed; code 5 拒绝访问"**。
+  - 两个根因叠在一起：
+    ① `.iss` 里写的是 **`CloseApplications=no`** —— 等于明确告诉安装程序
+       "别管占用进程"，于是它既不提示也不关闭，直接撞上被占用的 DLL；
+    ② 单实例判断只有 `QLockFile`（**文件**锁），而 Inno 的 `AppMutex` 认的是
+       **具名内核互斥体** —— 文件锁它看不见，所以连"请先退出 oi桌宠"这句提示
+       都给不出来。
+  - 三道保险（温和 → 强硬）：
+    1. **`AppMutex=oi_pet_desktop_single_instance`**。配套在 `main.py` 加
+       `_create_app_mutex()`（`CreateMutexW`），单实例仍由 QLockFile 负责，
+       这个互斥体纯粹为了让安装程序看得见我们；退出时在 `_cleanup_lock` 里
+       `CloseHandle`，否则句柄残留会被误判成"还在运行"。
+    2. **`CloseApplications=yes`** + `CloseApplicationsFilter=*.exe,*.dll,*.pyd`
+       + `RestartApplications=no` —— 让 Restart Manager 找出占用文件的进程并关掉。
+    3. `[Code]` 里的 **`taskkill /F /IM "oi桌宠.exe"`** 兜底（`PrepareToInstall`
+       里调，之后 `Sleep(800)` 等句柄真正释放）。托盘类进程 Restart Manager
+       常抓不到。`InitializeUninstall` 里也调一次 —— 不先退出卸载会删不干净。
+  - **只结束我们自己的 exe，绝不碰 msedge**：聚合AI 用的是用户自己的浏览器，
+    杀掉会连带关掉他正在看的网页；而浏览器持有的是 LOCALAPPDATA 下的
+    `webchat_profile`，不在安装目录里，本来也挡不住安装。这条写进了 .iss 注释
+    并有断言守着。
+  - `[Code]` 段要放**文件末尾**（Inno 的惯例位置）；我第一版插在 `[Files]` 前面，
+    虽然能跑但容易被后续改动带坏，已挪到末尾。
+  - `test_settings_sync` 加 8 条断言，其中一条专门守 **`.iss` 的 AppMutex 名字
+    必须和 `main.py` 里建的那个完全一致** —— 改一边忘改另一边的话，这个机制
+    等于没加，而且完全不报错。
 
 - 【v0.9.29：聚合AI 改成「贴边栏」—— 站点栏挂进浏览器窗口当子窗口 2026-10-02】
   - **用户要求**：不增加体积、和页面是一个整体、永不错位。按这个前提选了方案一
@@ -1810,7 +1839,7 @@ python -u test_components_scale.py                 # 组件缩放回归测试
 python -u test_templates.py                        # 模块模板验证（111 项，新增模板必跑）
 python -u test_webchat.py                          # 聚合AI：站点/摆位/粘住/切换/内缩/不阻塞/不空白/贴边栏（81 项）
 python -u test_pet_anim.py                         # 倾角动画 + 空盘开合 + 提示排版 + 悬停提示 + 动图暂停（50 项）
-python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性 + 托盘入口（25 项，沙箱隔离）
+python -u test_settings_sync.py                    # AI 助手改设置 ↔ 设置窗 一致性 + 托盘 + 安装包占用（33 项，沙箱隔离）
 python -u test_autostart.py                        # 开机自启读写与自愈（19 项，沙箱注册表键）
 python -u test_data_store.py                       # 原子写 + 每日滚动快照（13 项）
 python -u test_geometry.py                         # 几何不变式：三档 × 不出框/同中线/标题滚动/画布工具栏/弹窗摆位（71 项）

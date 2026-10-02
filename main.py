@@ -353,6 +353,31 @@ class DesktopPetApp:
         return self.app.exec_()
 
 
+# 安装程序用来判断"旧版还在跑"的具名互斥体。名字必须和 oi桌宠.iss 里的
+# AppMutex 完全一致 —— 用纯 ASCII，免得编码在两边对不上。
+APP_MUTEX_NAME = "oi_pet_desktop_single_instance"
+
+
+def _create_app_mutex():
+    """建一个具名互斥体，仅供安装程序检测"是否有实例在运行"。
+
+    单实例判断仍然由 QLockFile 负责（跨平台、已经在用）；这里纯粹是为了让
+    Inno Setup 的 AppMutex 能看见我们 —— 文件锁它看不见，于是以前装新版时
+    不会提示"请先退出"，而是直接撞上 _internal 里 DLL 被占用，报
+    "DeleteFile failed; code 5 拒绝访问"。
+
+    返回句柄（失败返回 None）；进程退出时在 _cleanup_lock 里关掉。
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        h = ctypes.windll.kernel32.CreateMutexW(None, False, APP_MUTEX_NAME)
+        return h or None
+    except Exception:
+        return None
+
+
 def main():
     # 把 Qt/yaml/桌宠模块提升为模块级全局，供 DesktopPetApp/load_config 使用
     global yaml, Qt, QLockFile, QApplication, QSystemTrayIcon, QMenu, QAction, QIcon
@@ -385,9 +410,21 @@ def main():
     lock.setStaleLockTime(1000)
     if not lock.tryLock(500):
         return   # 已有实例在运行：直接退出（单实例）
+    # 再额外建一个**具名互斥体**：QLockFile 是文件锁，安装程序看不见它。
+    # Inno Setup 的 AppMutex 认的就是这种内核对象 —— 有了它，装新版时能直接
+    # 提示"请先退出 oi桌宠"，而不是等替换 _internal 里的 DLL 时才报
+    # "DeleteFile failed; code 5 拒绝访问"。名字必须和 .iss 里的 AppMutex 一致。
+    _install_mutex = _create_app_mutex()
+
     def _cleanup_lock():
         try:
             lock.unlock()
+        except Exception:
+            pass
+        try:
+            if _install_mutex:
+                import ctypes
+                ctypes.windll.kernel32.CloseHandle(_install_mutex)
         except Exception:
             pass
 
