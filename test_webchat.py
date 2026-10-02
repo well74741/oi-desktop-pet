@@ -563,6 +563,17 @@ check("贴边栏：滑出/滑回是动画，缓动用桌宠统一那条曲线",
       "ease_in_out" in _src_dock and "_slide_tick" in _src_dock)
 check("贴边栏：窄边宽度够点得到，也不至于挡住页面",
       10 <= webchat_dock.DockBar.EDGE_W <= 28)
+# 收起态要尽量少挡页面：Edge 不给第三方留内容区，挤不窄页面，只能自己少占地方
+check("贴边栏：收起态只占左缘中间一小段高度，不贴满整条边",
+      30 <= webchat_dock.DockBar.HANDLE_H <= 120
+      and "_handle_h" in _src_dock and "HANDLE_H" in _src_dock)
+check("贴边栏：收起态半透明（用户要的 ~15% 透明）",
+      200 <= webchat_dock.DockBar.COLLAPSED_ALPHA <= 230)
+check("贴边栏：半透明走 Qt 的 setWindowOpacity（自己置 WS_EX_LAYERED 会被 Qt 覆盖）",
+      "setWindowOpacity" in _src_dock
+      and "SetLayeredWindowAttributes" not in _src_dock)
+check("贴边栏：宽高和纵向位置用同一个缓动量一起插值（整体展开，不是先跳高再变宽）",
+      "self._k" in _src_dock and "_slide_from + (self._slide_to" in _src_dock)
 
 check("用户数据没有被测试改写", SAVED == [])
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))

@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.32 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.33 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -167,6 +167,31 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.33：收纳条别挡着页面左边 —— 收起态改成"左缘中间一个小把手"+ 半透明 2026-10-02】
+  - 用户反馈："页面左侧显示不完整，会被收纳条遮挡住一部分。如果不好解决就做成
+    半透明的吧，大概 15% 透明左右。"
+  - **两件都做了，而且先做了更治本的那件**：Edge 不给第三方留内容区，我们没法把
+    网页挤窄，那就让自己**少占地方** —— 收起态从"贴满整条左缘的窄边"改成
+    "左缘正中间一个 21×96 的小把手"。实测遮挡从满高降到**窗口面积的 0.4%**
+    （`把手 21x96 / 窗口 820x560`）。半透明再叠上去（85% 不透明 = 15% 透明）。
+  - 宽、高、纵向位置用**同一个缓动量 `_k`** 一起插值，所以是"从左缘中间整体展开
+    成一条栏"，不会先跳高再变宽。
+  - **半透明踩的坑（值钱）**：一开始自己 `SetWindowLongW(GWL_EXSTYLE,
+    |WS_EX_LAYERED)` + `SetLayeredWindowAttributes`，**当场读回来是 0x00080000、
+    完全生效**，可一拍之后再读就变回 0。探针打出来才看清：
+    `[alpha] ex 00000000->00080000` 紧跟着 `winId=... exstyle=00000000`——
+    **Qt 只要碰一下这个窗口（显示/改尺寸/重绘）就按自己那套 flags 重算并覆盖
+    整个 `GWL_EXSTYLE`**，我们置的 layered 位被抹掉。跟 Qt 抢这个字段抢不赢，
+    改用 `setWindowOpacity` 一次就对。
+    期间我先后猜过"跨进程子窗口不支持 layered"和"alpha 缓存没跟着句柄走"，
+    **两个猜测都被实验否掉了**（同进程/跨进程微型探针都显示机制本身好用）——
+    教训还是那条：**别拿猜测当结论，打点看数据**。
+  - 最后一条 FAIL 是**断言写错了**不是代码错：不透明度回到 1.0 时 Qt 会把
+    `WS_EX_LAYERED` 整个摘掉，`GetLayeredWindowAttributes` 自然失败、alpha 读成 0
+    ——"没有 layered 位"和"alpha=255"都表示实心。断言改成两者都算过。
+  - `_check_dock_life.py` 升到 25 项（新增遮挡面积/居中/半透明/展开变实心）；
+    `test_webchat` 加 5 条静态断言（94 → 99）。
 
 - 【v0.9.32：贴边栏的「切站点弹新窗口 / 关掉就再也没有侧边栏 / 收起是硬裁一条」2026-10-02】
   - 用户反馈三条，都复现了，`_check_dock_life.py` 跑在**改之前**的代码上：
@@ -1924,7 +1949,7 @@ python -u _check_launch_cwd.py                     # 手动：真起子进程验
 #   from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
 #   CArchiveReader(exe).extract('PYZ.pyz') → 落盘 → ZlibArchiveReader(...).extract('模块名')
 #   → marshal.loads → 递归看 co_names/co_varnames/co_consts 里有没有你的新函数名
-python -u _check_dock_life.py                      # 手动：贴边栏切站点/窗口被关掉/收起态（19 项，临时 profile，跑完即删）
+python -u _check_dock_life.py                      # 手动：贴边栏切站点/窗口被关掉/收起态（25 项，临时 profile，跑完即删）
 python -u _check_dock.py                           # 手动：贴边栏挂进真实 Edge 窗口验真（17 项，临时 profile，跑完即删）
 python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（25 项，临时 profile，跑完即删）
 python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位

@@ -25,8 +25,10 @@
 - Qt 会重新主张自己的宽度（要 48 它给 136），所以几何必须在挂接之后再设，
   而且用 Win32 的 `SetWindowPos`，不要用 Qt 的 setGeometry。
 
-代价（已知、刻意接受）：Edge 不给第三方留内容区，所以这条栏是**盖在**页面左侧的。
-因此默认收成一条窄边，鼠标移上去才滑出——只在用的时候占地方。
+代价（已知、刻意接受）：Edge 不给第三方留内容区，我们**没法把页面挤窄**，
+这条栏只能盖在页面左侧。所以收起态做成了"左缘正中间一个小把手"（`EDGE_W` 宽、
+`HANDLE_H` 高，实测只遮住窗口面积的 0.4%）再加 15% 半透明，鼠标移上去才滑成整条栏
+——用户反馈"页面左侧显示不完整，会被收纳条遮挡住一部分"就是这么来的。
 
 两件踩过的坑，这里都有代码兜（都由 `_check_dock_life.py` 量过）：
 - **父窗口销毁会连带销毁子窗口**。用户把网页窗口一关，我们的原生句柄就被浏览器
@@ -35,6 +37,10 @@
 - **收起态不能靠"把全宽的栏硬裁一条"**。那样露出来的是半个按钮，又丑又读不懂
   （用户反馈"强行裁切了一条，显示也不完整"）。现在收起时栏是**整条滑出去**并
   隐藏，窄边上画一个明确的把手。
+- **半透明只能走 Qt 的 `setWindowOpacity`**。自己 `SetWindowLongW` 置
+  `WS_EX_LAYERED` 当场读回来是生效的，但 Qt 之后碰一下这个窗口就按它自己那套
+  flags 重算并覆盖整个 `GWL_EXSTYLE`，layered 位被抹掉 —— 几何全对、`exstyle`
+  却一直是 0。跟 Qt 抢这个字段抢不赢。
 """
 import ctypes
 
@@ -83,6 +89,8 @@ class DockBar(QWidget):
 
     SYNC_MS = 120          # 盯父窗口尺寸的间隔（只在变化时才动手，代价极低）
     EDGE_W = 14            # 收起态留的那条窄边（逻辑像素）
+    HANDLE_H = 64          # 收起态只占这么高（居中），不再贴满整条左缘
+    COLLAPSED_ALPHA = 217  # 收起态不透明度（255 的 85%，= 15% 透明）
     SLIDE_MS = 16          # 滑出/滑回的动画步长
     SLIDE_DUR = 0.18       # 滑出/滑回的时长（秒），和桌宠其他折叠动画一个手感
 
@@ -100,8 +108,10 @@ class DockBar(QWidget):
         self._expanded = False
         self._full_w = kit.ui(WebChatSidebar.PANEL_W)
         self._edge_w = kit.ui(self.EDGE_W)
-        self._w = self._edge_w     # 当前（可能正在动画中的）宽度
-        self.resize(self._edge_w, kit.ui(200))
+        self._handle_h = kit.ui(self.HANDLE_H)
+        self._k = 0.0              # 0 = 收起（小把手），1 = 展开（整条栏）
+        self._w = self._edge_w     # 由 _k 推出来的当前宽度（探针/测试在看）
+        self.resize(self._edge_w, self._handle_h)
         self._own_hwnd = int(self.winId())   # 记下来：句柄被系统销毁后还要查
         self._timer = QTimer(self)
         self._timer.setInterval(self.SYNC_MS)
@@ -113,9 +123,9 @@ class DockBar(QWidget):
         self._slide = QTimer(self)
         self._slide.setInterval(self.SLIDE_MS)
         self._slide.timeout.connect(self._slide_tick)
-        self._slide_from = self._slide_to = self._edge_w
+        self._slide_from = self._slide_to = 0.0
         self._slide_t0 = 0.0
-        self.bar.hide()            # 初始是收起态，窄边上画把手
+        self.bar.hide()            # 初始是收起态，只有那个小把手
 
     # ---------- 生死 ----------
     def parent_hwnd(self):
@@ -240,16 +250,28 @@ class DockBar(QWidget):
         self._apply_geom()
 
     def _apply_geom(self):
-        """用 Win32 摆自己：Qt 的 setGeometry 会被它自己的布局改回去。"""
+        """用 Win32 摆自己：Qt 的 setGeometry 会被它自己的布局改回去。
+
+        收起态**只占中间一小段高度**（`HANDLE_H`），不再贴满整条左缘 ——
+        用户反馈"页面左侧显示不完整，会被收纳条遮挡住一部分"，而 Edge 不给
+        第三方留内容区，我们没法把页面挤窄，只能让自己少占地方。
+        展开时宽、高、纵向位置用同一个缓动量 `_k` 一起插值，所以是一个整体的
+        "从左缘中间展开成一条栏"，不会出现先跳高再变宽。
+        """
         box = self._client_box()
         if box is None:
             return
-        top, h = box
-        w = max(self._edge_w, int(round(self._w)))
+        top, full_h = box
+        k = max(0.0, min(1.0, self._k))
+        w = self._edge_w + (self._full_w - self._edge_w) * k
+        h = self._handle_h + (max(full_h, self._handle_h) - self._handle_h) * k
+        w, h = max(self._edge_w, int(round(w))), max(1, int(round(h)))
+        self._w = w
+        y = top + int(round((max(full_h, h) - h) / 2.0))
         try:
             _u.SetWindowPos(ctypes.c_void_p(int(self.winId())),
                             ctypes.c_void_p(_HWND_TOP),
-                            0, top, w, h, _SWP_NOACTIVATE)
+                            0, y, w, h, _SWP_NOACTIVATE)
         except Exception:
             pass
         # 整条栏**滑进滑出**：左缘停在 w - full_w，展开时正好是 0。
@@ -259,38 +281,53 @@ class DockBar(QWidget):
         show_bar = w > self._edge_w + kit.ui(2)
         if show_bar != self.bar.isVisible():
             self.bar.setVisible(show_bar)
+        self._apply_alpha(k)
         self.update()
+
+    def _apply_alpha(self, k):
+        """收起态半透明（用户要的 ~15% 透明），展开态实心。
+
+        **必须走 Qt 的 `setWindowOpacity`，不能自己去置 `WS_EX_LAYERED`。**
+        实测：自己 `SetWindowLongW(GWL_EXSTYLE, |WS_EX_LAYERED)` 当场是生效的
+        （读回来 0x00080000），但只要 Qt 之后碰一下这个窗口（显示/改尺寸/重绘），
+        它就按自己那套 flags **重算并覆盖整个 GWL_EXSTYLE**，layered 位被抹掉，
+        于是几何全对、`exstyle` 却一直是 0。跟 Qt 抢这个字段是抢不赢的。
+        """
+        o = (self.COLLAPSED_ALPHA / 255.0
+             + (1.0 - self.COLLAPSED_ALPHA / 255.0) * max(0.0, min(1.0, k)))
+        o = round(o, 3)
+        if o == getattr(self, "_alpha_now", None):
+            return
+        try:
+            self.setWindowOpacity(o)
+            self._alpha_now = o
+        except Exception:
+            pass
 
     # ---------- 收起态的把手 ----------
     def paintEvent(self, ev):
-        """窄边自己画一个把手：一条竖纹 + 一个指向右边的小箭头。
+        """收起态画一个小把手；展开态画栏的底色。
 
-        收起态是**常态**（只在用的时候才滑出），所以它必须看着是刻意设计的
-        一条边，而不是一个被切掉一半的侧边栏。
+        收起态是**常态**，所以它必须看着是刻意设计的一个把手，而不是一条
+        被切掉一半的侧边栏，而且要尽量少挡页面。
         """
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         w, h = self.width(), self.height()
-        p.fillRect(0, 0, w, h, QColor(21, 27, 38))
-        # 右缘一条分界线，和页面区分开
-        p.setPen(QPen(QColor(42, 51, 70), 1))
-        p.drawLine(w - 1, 0, w - 1, h)
         if self.bar.isVisible():
-            return                      # 展开态由里面那条栏自己画
-        # 窄边中间一个"把手"：稍亮的圆角片 + 一道亮色竖纹。
-        # 只用这一个元素 —— 21px 宽的条上再塞箭头会变成一堆看不懂的碎符号。
-        cy = h / 2.0
-        tw = max(w - kit.ui(4), kit.ui(8))
-        th = kit.ui(56)
+            p.fillRect(0, 0, w, h, QColor(21, 27, 38))
+            p.setPen(QPen(QColor(42, 51, 70), 1))
+            p.drawLine(w - 1, 0, w - 1, h)
+            return
+        # 收起态：整个窗口就是那个把手，右侧圆角，左边贴着窗口边缘
+        r = kit.ui(5)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(32, 40, 56))
-        r = kit.ui(4)
-        p.drawRoundedRect(QRectF((w - tw) / 2.0 - kit.ui(1), cy - th / 2.0,
-                                 tw, th), r, r)
-        gw, gh = max(2, kit.ui(3)), kit.ui(26)
-        p.setBrush(QColor(74, 158, 255, 200))
-        p.drawRoundedRect(QRectF((w - gw) / 2.0 - kit.ui(1), cy - gh / 2.0,
-                                 gw, gh), gw / 2.0, gw / 2.0)
+        p.setBrush(QColor(28, 35, 49))
+        p.drawRoundedRect(QRectF(-r, 0, w + r, h), r, r)
+        gw, gh = max(2, kit.ui(3)), min(kit.ui(26), max(kit.ui(8), h - kit.ui(16)))
+        p.setBrush(QColor(74, 158, 255, 210))
+        p.drawRoundedRect(QRectF((w - gw) / 2.0, (h - gh) / 2.0, gw, gh),
+                          gw / 2.0, gw / 2.0)
 
     # ---------- 自动隐藏 ----------
     def _set_expanded(self, on):
@@ -298,10 +335,10 @@ class DockBar(QWidget):
         if on == self._expanded:
             return
         self._expanded = on
-        self._slide_to = self._full_w if on else self._edge_w
-        self._slide_from = self._w
-        if abs(self._slide_to - self._slide_from) < 1:
-            self._w = self._slide_to
+        self._slide_to = 1.0 if on else 0.0
+        self._slide_from = self._k
+        if abs(self._slide_to - self._slide_from) < 0.01:
+            self._k = self._slide_to
             self._apply_geom()
             return
         if on:
@@ -319,14 +356,14 @@ class DockBar(QWidget):
             self._slide.stop()
             self.forget_native()
             return
-        k = (time.monotonic() - self._slide_t0) / max(0.01, self.SLIDE_DUR)
-        done = k >= 1.0
-        k = 1.0 if done else ease_in_out(k)
-        self._w = self._slide_from + (self._slide_to - self._slide_from) * k
+        t = (time.monotonic() - self._slide_t0) / max(0.01, self.SLIDE_DUR)
+        done = t >= 1.0
+        e = 1.0 if done else ease_in_out(t)
+        self._k = self._slide_from + (self._slide_to - self._slide_from) * e
         self._apply_geom()
         if done:
             self._slide.stop()
-            self._w = self._slide_to
+            self._k = self._slide_to
             self._apply_geom()
 
     def enterEvent(self, ev):

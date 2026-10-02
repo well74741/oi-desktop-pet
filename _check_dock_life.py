@@ -209,6 +209,55 @@ try:
               "量到 %d 个不同宽度" % len(uniq))
         check("收回到位后栏已隐藏（窄边上画把手，不露半个按钮）",
               not d3.bar.isVisible() and int(round(d3._w)) == d3._edge_w)
+
+        # ---------- ⑤ 收起态要少挡页面 + 半透明 ----------
+        d3._set_expanded(False)
+        pump(0.5)
+        pr = rect_of(d3._hwnd) if d3._hwnd else None
+        dr = rect_of(int(d3.winId()))
+        if pr and dr:
+            cover = (dr[2] * dr[3]) / float(max(1, pr[2] * pr[3]))
+            check("收起态遮住页面的面积很小（不再贴满整条左缘）",
+                  cover < 0.04,
+                  "把手 %dx%d / 窗口 %dx%d = %.1f%%"
+                  % (dr[2], dr[3], pr[2], pr[3], cover * 100))
+            check("收起态只占左缘中间一小段高度，不是满高",
+                  dr[3] <= pr[3] * 0.4,
+                  "把手高 %d / 窗口高 %d" % (dr[3], pr[3]))
+            check("收起态纵向居中（在左缘中间，位置可预期好找）",
+                  abs((dr[1] + dr[3] / 2) - (pr[1] + pr[3] / 2)) <= 4,
+                  "把手中心 y=%d / 窗口中心 y=%d"
+                  % (dr[1] + dr[3] // 2, pr[1] + pr[3] // 2))
+
+        # 半透明是不是真的生效了（WS_EX_LAYERED + 实际 alpha 值）
+        dh_now = int(d3.winId())
+        ex = u.GetWindowLongW(ctypes.c_void_p(dh_now), -20) & 0xFFFFFFFF
+        alpha = ctypes.c_ubyte(0)
+        flags = ctypes.c_ulong(0)
+        got = u.GetLayeredWindowAttributes(ctypes.c_void_p(dh_now), None,
+                                          ctypes.byref(alpha),
+                                          ctypes.byref(flags))
+        check("收起态半透明真的生效了（WS_EX_LAYERED 已置上）",
+              bool(ex & 0x00080000), "exstyle=0x%08X" % ex)
+        check("收起态不透明度约 85%（= 用户要的 15% 透明）",
+              bool(got) and 200 <= alpha.value <= 230,
+              "alpha=%d（255 为实心）" % alpha.value)
+
+        d3._set_expanded(True)
+        pump(0.5)
+        dh_exp = int(d3.winId())
+        alpha2 = ctypes.c_ubyte(0)
+        got2 = u.GetLayeredWindowAttributes(ctypes.c_void_p(dh_exp), None,
+                                            ctypes.byref(alpha2),
+                                            ctypes.byref(flags))
+        ex2 = u.GetWindowLongW(ctypes.c_void_p(dh_exp), -20) & 0xFFFFFFFF
+        # 不透明度回到 1.0 时 Qt 会把 WS_EX_LAYERED **整个摘掉** —— 没有 layered
+        # 位和 alpha=255 都表示"实心"，两者都算过。
+        check("展开后变回实心（按钮文字不该是半透的）",
+              (not ex2 & 0x00080000) or (got2 and alpha2.value == 255),
+              "exstyle=0x%08X got=%s alpha=%d" % (ex2, bool(got2), alpha2.value))
+        d3._set_expanded(False)
+        pump(0.4)
 finally:
     try:
         d = W.dock(create=False)
