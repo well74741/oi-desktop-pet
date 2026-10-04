@@ -564,8 +564,11 @@ def _add_rule(rule, from_template=None):
     _trusted = from_template in _SAFE_SCRIPT_TEMPLATES
     if _stype == "file" or (_stype == "script" and not _trusted):
         if not _ai_exec_allowed():
-            return ("为安全起见，AI 默认不能创建会执行本地代码/读取本地文件的"
-                    "「%s」模块。如需放开，请在「设置 → AI 设置」勾选"
+            return (                    "为安全起见，AI 当前不能创建会执行本地代码/读取本地文件的"
+                    "「%s」模块。**请改用这些替代方案**：static（固定文本）、"
+                    "http（接口取数）、clock（时间/倒计时）、llm（大模型），"
+                    "或 add_module_from_template 里的模板。"
+                    "如需放开，请在「设置 → AI 设置」勾选"
                     "『允许 AI 创建可执行模块（脚本/读文件）』后重试"
                     "（存在被诱导执行任意命令的风险，自担风险）。" % _stype)
     st = _pet_api.load_settings()
@@ -578,6 +581,23 @@ def _add_rule(rule, from_template=None):
     trial = _trial_collect(rule)
     return "已添加模块：%s（type=%s）。%s" % (
         name, rule["source"].get("type"), trial)
+
+
+# 闸门关着时附加在 add_module 说明末尾的一段话。提前说清楚，模型就不会
+# 去试那些注定被拒的类型 —— 原来说明里没提这道闸，模型只能撞上去才知道。
+_EXEC_GATE_HINT = (
+    "【重要】当前设置不允许 AI 创建 script / file 类型模块（它们会执行本地"
+    "代码或读取本地文件）。请改用 static / http / clock / llm，"
+    "或直接用 add_module_from_template。"
+)
+
+
+def tool_description(name):
+    """取工具说明；add_module 会随安全闸门开关动态变化。"""
+    d = (TOOL_DEFS.get(name) or {}).get("description", "")
+    if name == "add_module" and not _ai_exec_allowed():
+        return d + _EXEC_GATE_HINT
+    return d
 
 
 def _tool_add_module(args):
@@ -787,10 +807,57 @@ def _tool_add_module_from_template(args):
 
 
 def _name_match(a, b):
-    """模块名模糊匹配：忽略大小写，互相包含即算命中。"""
+    """模块名匹配：忽略大小写，精确优先，其次才是包含。
+
+    **"包含"必须唯一才算命中。** 原来的规则是"互相包含即算命中"，于是
+    `remove_module(name="AI")` 会把「聚合AI」「AI助手」「AI本地·Ollama」一起删掉
+    —— 实测过，而且内置模块被删会记进 hidden_builtins、不会自动恢复。
+    删除 / 启停 / 排序模块和按钮的 6 个工具都走这里，所以这条得保守。
+
+    返回 True 表示"就它了"；有多个候选时返回 False，让调用方给出候选列表
+    让用户确认，而不是赌一个。
+    """
     a = str(a or "").strip().lower()
     b = str(b or "").strip().lower()
-    return bool(a and b and (a == b or a in b or b in a))
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return a in b or b in a
+
+
+def _not_found(kind, name, cands, list_tool):
+    """说清是"没找到"还是"匹配到多个"，并把候选列出来。
+
+    故意不猜：多个候选时请拿完整名字再来一次，总好过赌一个、把不相干的
+    模块删掉（内置模块被删还会记进 hidden_builtins，不会自动恢复）。
+    """
+    if cands:
+        return ("有 %d 个%s匹配「%s」：%s。请用完整名称重试。"
+                % (len(cands), kind, name, "、".join(cands[:8])))
+    return "未找到%s：%s（可先用 %s 看准确名称）" % (kind, name, list_tool)
+
+
+def _match_one(items, query, key="name"):
+    """在一组 item 里挑**唯一**匹配项。
+
+    返回 (命中的 item 或 None, 候选名列表)。
+    - 精确命中：只有一个（或取第一个同名）就直接给；
+    - 模糊命中：**唯一**才给；多个候选返回候选列表，由调用方拒绝并提示。
+    """
+    key = key or "name"
+    q = str(query or "").strip().lower()
+    if not q:
+        return None, []
+    exact = [it for it in items if str(it.get(key, "")).strip().lower() == q]
+    if len(exact) == 1:
+        return exact[0], []
+    if len(exact) > 1:
+        return exact[0], []
+    cands = [it for it in items if _name_match(it.get(key, ""), query)]
+    if len(cands) == 1:
+        return cands[0], []
+    return None, [str(it.get(key, "")) for it in cands]
 
 
 def _tool_remove_module(args):
@@ -800,15 +867,11 @@ def _tool_remove_module(args):
     try:
         st = _pet_api.load_settings()
         rules = list(st.get("status_rules", []) or [])
-        keep = []
-        removed_ids = []
-        for r in rules:
-            if _name_match(r.get("name", ""), name):
-                removed_ids.append(r.get("id"))
-            else:
-                keep.append(r)
-        if not removed_ids:
-            return "未找到模块：%s（可先用 list_modules 看准确名称）" % name
+        _hit, _cands = _match_one(rules, name)
+        if _hit is None:
+            return _not_found("模块", name, _cands, "list_modules")
+        keep = [r for r in rules if r is not _hit]
+        removed_ids = [_hit.get("id")]
         st["status_rules"] = keep
         # 内置模块删除后必须记入 hidden_builtins，否则 load_settings 会重新合并回来
         hidden = list(set(st.get("hidden_builtins") or []))
@@ -827,13 +890,10 @@ def _tool_enable_module(args):
     try:
         st = _pet_api.load_settings()
         rules = list(st.get("status_rules", []) or [])
-        hit = False
-        for r in rules:
-            if _name_match(r.get("name", ""), name):
-                r["enabled"] = enabled
-                hit = True
-        if not hit:
-            return "未找到模块：%s（可先用 list_modules 看准确名称）" % name
+        _hit, _cands = _match_one(rules, name)
+        if _hit is None:
+            return _not_found("模块", name, _cands, "list_modules")
+        _hit["enabled"] = enabled
         st["status_rules"] = rules
         _pet_api.save_settings(st)
         _pet_api.reload_rules()
@@ -850,13 +910,10 @@ def _tool_move_module(args):
     try:
         st = _pet_api.load_settings()
         rules = list(st.get("status_rules", []) or [])
-        idx = None
-        for i, r in enumerate(rules):
-            if _name_match(r.get("name", ""), name):
-                idx = i
-                break
-        if idx is None:
-            return "未找到模块：%s" % name
+        _hit, _cands = _match_one(rules, name)
+        if _hit is None:
+            return _not_found("模块", name, _cands, "list_modules")
+        idx = rules.index(_hit)
         if isinstance(to, int) and 0 <= to < len(rules):
             r = rules.pop(idx)
             rules.insert(to, r)
@@ -921,14 +978,11 @@ def _tool_remove_button(args):
         st = _pet_api.load_settings()
         scs = list(st.get("slot_shortcuts", []) or [])
         keep = []
-        removed = []
-        for s in scs:
-            if _name_match(s.get("name", ""), name):
-                removed.append(s.get("name"))
-            else:
-                keep.append(s)
-        if not removed:
-            return "未找到按钮：%s（可先用 list_buttons 看准确名称）" % name
+        _hit, _cands = _match_one(scs, name)
+        if _hit is None:
+            return _not_found("按钮", name, _cands, "list_buttons")
+        keep = [x for x in scs if x is not _hit]
+        removed = [_hit.get("name")]
         st["slot_shortcuts"] = keep
         _pet_api.save_settings(st)
         _pet_api.reload_buttons()
@@ -945,13 +999,10 @@ def _tool_move_button(args):
     try:
         st = _pet_api.load_settings()
         scs = list(st.get("slot_shortcuts", []) or [])
-        idx = None
-        for i, s in enumerate(scs):
-            if _name_match(s.get("name", ""), name):
-                idx = i
-                break
-        if idx is None:
-            return "未找到按钮：%s（可先用 list_buttons 看准确名称）" % name
+        _hit, _cands = _match_one(scs, name)
+        if _hit is None:
+            return _not_found("按钮", name, _cands, "list_buttons")
+        idx = scs.index(_hit)
         if isinstance(to, int) and 0 <= to < len(scs):
             s = scs.pop(idx)
             scs.insert(to, s)
@@ -983,13 +1034,10 @@ def _tool_edit_button(args):
     try:
         st = _pet_api.load_settings()
         scs = list(st.get("slot_shortcuts", []) or [])
-        hit = None
-        for s in scs:
-            if _name_match(s.get("name", ""), name):
-                hit = s
-                break
-        if hit is None:
-            return "未找到按钮：%s（可先用 list_buttons 看准确名称）" % name
+        _hit, _cands = _match_one(scs, name)
+        if _hit is None:
+            return _not_found("按钮", name, _cands, "list_buttons")
+        hit = _hit
         if new_name:
             hit["name"] = new_name
         if new_target:
@@ -1148,6 +1196,27 @@ def _merge_ai_profile(st):
     if not str(out.get("api_style", "") or "").strip() and prof.get("api_style"):
         out["api_style"] = prof.get("api_style")
     return out
+
+
+# 大模型请求的默认超时。
+# 工具轮现在走**流式**（见 chat_stream_tools）：流式是边生成边到货，超时只约束
+# "多久没有新数据"，所以可以给得宽松；以前工具轮是非流式，首字节要等整段生成完，
+# 10 秒的默认值让"写个模块"这种长回答几乎必然超时（用户实测的"调用工具失败"）。
+_LLM_TIMEOUT_DEFAULT = 60
+
+
+def _llm_timeout(st, hard=False):
+    """大模型请求超时（秒）。
+
+    hard=True 用于非流式回退：那时首字节要等整段生成完，必须给足。
+    """
+    try:
+        v = float(st.get("timeout") or 0)
+    except Exception:
+        v = 0.0
+    if v <= 0:
+        v = _LLM_TIMEOUT_DEFAULT
+    return max(v, 120.0) if hard else v
 
 
 def _apply_llm_auth(req, base, key, style=None):
@@ -2064,8 +2133,8 @@ class RuleProvider(StatusProvider):
             except Exception:
                 pass
 
-    def _stream_sse(self, st2, body, stop_event=None):
-        """SSE 流式请求：逐块产出 (累计文本, 思考文本)。"""
+    def _sse_open(self, st2, body):
+        """开一个 SSE 流，返回响应对象。工具轮和正文流共用同一套请求准备。"""
         base = str(st2.get("base_url", "")).strip().rstrip("/")
         if not base:
             raise ValueError("缺少 base_url")
@@ -2079,30 +2148,38 @@ class RuleProvider(StatusProvider):
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "text/event-stream")
         _apply_llm_auth(req, base, key, st2.get("api_style"))
+        return urllib.request.urlopen(req, timeout=_llm_timeout(st2))
+
+    @staticmethod
+    def _sse_events(resp, stop_event=None):
+        """把 SSE 响应逐条解析成 event dict（跳过非 data 行）。"""
+        for raw in resp:
+            if stop_event is not None and stop_event.is_set():
+                return
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[len("data:"):].strip()
+            if not payload or payload == "[DONE]":
+                return
+            try:
+                yield json.loads(payload)
+            except Exception:
+                continue
+
+    def _stream_sse(self, st2, body, stop_event=None):
+        """SSE 流式请求：逐块产出 (累计文本, 思考文本)。"""
         acc = ""
         reasoning = ""
         self._active_resp = None
         try:
-            with urllib.request.urlopen(req, timeout=float(st2.get("timeout", 10) or 10)) as resp:
+            with self._sse_open(st2, body) as resp:
                 self._active_resp = resp
                 try:
-                    for raw in resp:
-                        if stop_event is not None and stop_event.is_set():
-                            break   # 用户主动停止
-                        line = raw.decode("utf-8", "replace").strip()
-                        if not line.startswith("data:"):
-                            continue
-                        payload = line[len("data:"):].strip()
-                        if not payload or payload == "[DONE]":
-                            break
-                        try:
-                            obj = json.loads(payload)
-                            delta = (obj.get("choices") or [{}])[0].get("delta") or {}
-                            piece = delta.get("content") or ""
-                            rp = delta.get("reasoning_content") or ""
-                        except Exception:
-                            piece = ""
-                            rp = ""
+                    for obj in self._sse_events(resp, stop_event):
+                        delta = (obj.get("choices") or [{}])[0].get("delta") or {}
+                        piece = delta.get("content") or ""
+                        rp = delta.get("reasoning_content") or ""
                         if rp:
                             reasoning += rp
                         if piece:
@@ -2118,11 +2195,16 @@ class RuleProvider(StatusProvider):
 
     def chat_stream_tools(self, text, history=None, tools=None, stop_event=None,
                           on_tool=None):
-        """带 function calling 的流式对话：先处理工具调用（最多 6 轮，
-        给模型留出 list_* 探索 + 实际操作 + 最终回答的空间），
-        最后一轮无工具调用时流式输出正文。tools 为工具名列表（见 TOOL_DEFS）。
+        """带 function calling 的对话：先处理工具调用，最后一轮输出正文。
+
+        **每一轮都走流式**，所以"模型想得久"不会再变成超时失败；
+        仅在服务端不下发流式 tool_calls 时退回非流式（那时才用放宽的超时）。
+        轮数不设上限，靠"同一工具+同一参数连续重复"检测防死循环。
+
+        tools 为工具名列表（见 TOOL_DEFS）。
         stop_event 为 threading.Event：置位后中止（用户点"停止"）。
-        on_tool(name, args, result)：每次工具执行后回调（过程可视化）。"""
+        on_tool(name, args, result)：每次工具执行后回调（过程可视化）。
+        """
         st = self._source()
         if st.get("type") != "llm":
             raise ValueError("仅大模型规则支持对话")
@@ -2160,12 +2242,17 @@ class RuleProvider(StatusProvider):
             return
         tool_objs = [{"type": "function",
                       "function": {"name": n,
-                                   "description": TOOL_DEFS[n]["description"],
+                                   "description": tool_description(n),
                                    "parameters": TOOL_DEFS[n]["parameters"]}}
                      for n in names]
         # 工具循环不设轮数上限；用"重复调用检测"防烧 token：
         # 同一工具 + 同一参数连续重复 >=5 次视为死循环，停止
         repeat_track = []   # 最近调用签名
+        # **工具轮走流式**：首字节一到就能读到，超时只约束"多久没有新数据"，
+        # 所以不会因为"模型想得久"而失败。以前是非流式，首字节要等整段生成完，
+        # 默认 10 秒超时让"帮我写个模块"这种长回答几乎必然失败 —— 用户实测的
+        # "调用工具失败"就是这条。
+        use_stream = True
         while True:
             if stop_event is not None and stop_event.is_set():
                 yield "（已停止）", ""
@@ -2173,14 +2260,22 @@ class RuleProvider(StatusProvider):
             body = {"model": st2.get("model", ""), "messages": messages,
                     "temperature": float(st2.get("temperature", 0.8) or 0.8),
                     "max_tokens": int(st2.get("max_tokens", 8192) or 8192),
-                    "tools": tool_objs, "stream": False}
-            msg = self._llm_request_msg(st2, body)
+                    "tools": tool_objs}
+            if use_stream:
+                msg, empty = self._tool_round_stream(st2, body, stop_event)
+                if empty:
+                    # 整轮既没有正文也没有工具调用：可能是该服务商的流式实现不
+                    # 下发 tool_calls。退回非流式（那才需要把超时放宽）再要一次。
+                    use_stream = False
+                    continue
+            else:
+                b = dict(body)
+                b["stream"] = False
+                msg = self._llm_request_msg(st2, b)
             calls = msg.get("tool_calls") or []
             if not calls:
-                # 无工具调用：最后一轮正文流式输出
-                final_body = dict(body)
-                final_body["stream"] = True
-                yield from self._stream_sse(st2, final_body, stop_event)
+                # 无工具调用：这一轮的正文就是最终回答
+                yield from self._finish_round(st2, body, msg, stop_event)
                 return
             messages.append({"role": "assistant",
                              "content": msg.get("content") or None,
@@ -2223,6 +2318,109 @@ class RuleProvider(StatusProvider):
                     return
             else:
                 repeat_track = [sigs] if sigs else []
+
+    @staticmethod
+    def _assemble_stream_message(obj, acc):
+        """把一条 SSE 事件累积进 acc（就地修改）。
+
+        工具调用的 arguments 在流式里是**分片**下发的，必须按 index 拼起来才能
+        得到合法 JSON —— 这是流式 function calling 唯一的坑，拼错就会得到
+        "Expecting value" 之类的解析失败，表现成"工具调用失败"。
+        """
+        try:
+            if obj.get("usage"):
+                acc["usage"] = obj["usage"]
+            ch = (obj.get("choices") or [{}])[0]
+            delta = ch.get("delta") or ch.get("message") or {}
+            if delta.get("content"):
+                acc["content"] += delta["content"]
+            if delta.get("reasoning_content"):
+                acc["reasoning"] += delta["reasoning_content"]
+            for tc in delta.get("tool_calls") or []:
+                idx = tc.get("index")
+                if idx is None:
+                    idx = len(acc["tool_calls"])
+                cur = acc["tool_calls"].setdefault(
+                    idx, {"id": "", "type": "function",
+                          "function": {"name": "", "arguments": ""}})
+                if tc.get("id"):
+                    cur["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                nm = fn.get("name") or ""
+                if nm and not cur["function"]["name"].endswith(nm):
+                    # 名字可能整段给（只给一次），也可能分片；两种都拼得对
+                    cur["function"]["name"] += nm
+                if fn.get("arguments"):
+                    cur["function"]["arguments"] += fn["arguments"]
+        except Exception:
+            pass
+
+    def _record_stream_usage(self, acc, st2):
+        """把流式这一轮的 token 用量记进统计（服务端回了 usage 才有）。"""
+        try:
+            u = acc.get("usage") or {}
+            pt = int(u.get("prompt_tokens") or 0)
+            ct = int(u.get("completion_tokens") or 0)
+            if pt or ct:
+                _record_token_usage(
+                    module=str(self.rule.get("name", "未知模块") or "未知模块"),
+                    prompt=pt, completion=ct)
+        except Exception:
+            pass
+
+    def _tool_round_stream(self, st2, body, stop_event):
+        """流式跑一轮工具决策，返回 (message, 是否整轮为空)。
+
+        message = {"content", "reasoning", "tool_calls", "usage"}
+        `是否整轮为空`（既无正文也无工具调用）时，调用方退回非流式再要一次 ——
+        少数服务商的流式实现不下发 tool_calls，不能因此把功能弄坏。
+        """
+        for with_usage in (True, False):
+            acc = {"content": "", "reasoning": "", "tool_calls": {}, "usage": None}
+            b = dict(body)
+            b["stream"] = True
+            if with_usage:
+                # 请求服务端在流末尾补一条 usage，好把工具轮的 token 也统计上
+                b["stream_options"] = {"include_usage": True}
+            try:
+                self._active_resp = None
+                with self._sse_open(st2, b) as resp:
+                    self._active_resp = resp
+                    for obj in self._sse_events(resp, stop_event):
+                        self._assemble_stream_message(obj, acc)
+                    break
+            except Exception:
+                if stop_event is not None and stop_event.is_set():
+                    break
+                if not with_usage:
+                    raise      # 去掉 stream_options 仍然失败，那就是真失败了
+            finally:
+                self._active_resp = None
+        self._record_stream_usage(acc, st2)
+        calls = [acc["tool_calls"][k] for k in sorted(acc["tool_calls"])]
+        msg = {"content": acc["content"] or None,
+               "reasoning": acc["reasoning"],
+               "tool_calls": calls,
+               "usage": acc["usage"]}
+        return msg, (not calls and not acc["content"])
+
+    def _finish_round(self, st2, body, msg, stop_event):
+        """最后一轮：把这一轮拿到的正文吐出去。
+
+        以前这里无条件再发一次流式请求，等于**每句话都问模型两遍**：第一次的回答
+        直接丢掉，token 和等待时间都翻倍，而且显示出来的可能和第一次不是同一个。
+        现在拿到正文就直接用；只有正文为空（比如这一轮只回了思考）才补一次，
+        补的时候**去掉 tools**，逼它给一段纯文本，避免又回一轮工具调用导致界面空白。
+        """
+        text = str(msg.get("content") or "")
+        if text:
+            yield text, str(msg.get("reasoning") or "")
+            return
+        b = dict(body)
+        b["stream"] = True
+        b.pop("tools", None)
+        b.pop("stream_options", None)
+        yield from self._stream_sse(st2, b, stop_event)
 
     def pending_request(self):
         return getattr(self, "_pending", None)
@@ -2414,8 +2612,8 @@ class RuleProvider(StatusProvider):
                                      method="POST")
         req.add_header("Content-Type", "application/json")
         _apply_llm_auth(req, base, key, st.get("api_style"))
-        with urllib.request.urlopen(req,
-                                    timeout=float(st.get("timeout", 10) or 10)) as resp:
+        with urllib.request.urlopen(
+                req, timeout=_llm_timeout(st, hard=True)) as resp:
             out = json.loads(resp.read(_MAX_RESP_BYTES).decode("utf-8"))
         # 记录真实 token 用量（OpenAI 兼容接口的 usage 字段）
         try:

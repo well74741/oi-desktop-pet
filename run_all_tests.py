@@ -87,6 +87,7 @@ def main():
           "_check_launch_cwd.py（启动外部程序不继承桌宠目录）、"
           "_check_dock_life.py（贴边栏切站点/被关掉/收起态）、"
           "_check_dock_drag.py（拖窗口时贴边栏的开销）、"
+          "_check_ai_tools.py（AI 工具对话：超时/请求次数/误删防护）、"
           "_check_chatpanel.py（对话面板几何）")
     return 0
 
