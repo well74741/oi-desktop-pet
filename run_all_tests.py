@@ -89,6 +89,7 @@ def main():
           "_check_dock_drag.py（拖窗口时贴边栏的开销）、"
           "_check_ai_tools.py（AI 工具对话：超时/请求次数/误删防护）、"
           "_check_hotkey.py（全局热键：解析/注册/冲突/线程）、"
+          "_check_hotkey_capture.py（被占用的组合也能录，真实按键）、"
           "_check_chatpanel.py（对话面板几何）")
     return 0
 

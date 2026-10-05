@@ -225,6 +225,21 @@
       GitHub 附件的 digest 对照用）。踩坑：`for /f` 里的命令**只能有一对引号**，多对时 cmd
       吃掉首尾两个、路径就断了，收尾读版本号失败显示成"v 打包完成"。改成和 build.bat
       一样的 `'"%PYENV%" _make_version.py'`。已在真实 cmd 里端到端跑通，并纳入 CRLF 检查。
+    - **（再补）"Ctrl+Alt+Space 前两个键能识别到，空格识别不到"**：用户电脑上**别的程序
+      已经 RegisterHotKey 占了这个组合**，系统在按键送达任何窗口之前就截走了，录入框只
+      收到 Ctrl、Alt。本机复现：另一个线程注册 Ctrl+Alt+Space 再 SendInput，"别的程序"
+      收到 WM_HOTKEY、录入框什么都没录到。我自己测时没这个占用，所以前一轮没测出来。
+      修：录入框获得焦点时挂 **WH_KEYBOARD_LL**（在系统热键处理之前就能看到按键），
+      有修饰键 + 认得的主键就录下并**吞掉**这次按键（否则占着它的程序会被触发），
+      失焦 / 窗口隐藏立刻摘掉 —— 不常驻监听键盘。回调对象必须持有引用（被回收会崩）。
+      顺带关掉录入框的输入法（中文输入法开着时空格会被拿去选字）。录到组合后**当场试
+      注册**，被占用就在输入框右边提示"已被其他程序占用，换一个"，不等点「确定」。
+      真实按键验证在 `_check_hotkey_capture.py`（会往前台发按键，不进自动测试，5 项）。
+      查这个时探针还自己崩过一次（退出码 127、无异常）：用 lambda 覆盖 PyQt 的
+      keyPressEvent 返回了元组，PyQt 对虚函数返回值不合法会直接 qFatal 结束进程。
+    - **热键是"呼出"不是"开关"**：`_on_hotkey` 原来调 `toggle_menu`，菜单已展开时再按
+      就收起了（用户反馈）。现在已展开（或正在展开）只挪到鼠标处；正在收起时按下会被
+      toggle_menu 反转成展开。
     - **已知偶发**：`test_pet_anim` 的"左右贴边时改成竖向排列"在 3.12 全量跑时失败过一次
       （竖排的位置为空），单独连跑 10 次全过、相关代码与测试自 0.9.39 未改。它依赖菜单在
       屏幕上的实际位置，疑似负载高时摆位还没稳定就量了。暂未改，再出现就该给它加等待。
@@ -2274,7 +2289,8 @@ python -u _check_launch_cwd.py                     # 手动：真起子进程验
 #   from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
 #   CArchiveReader(exe).extract('PYZ.pyz') → 落盘 → ZlibArchiveReader(...).extract('模块名')
 #   → marshal.loads → 递归看 co_names/co_varnames/co_consts 里有没有你的新函数名
-python -u test_hotkey.py                           # 热键录入框 + 保存时不误报占用（19 项，会真注册一个组合）
+python -u test_hotkey.py                           # 热键录入框 / 保存不误报 / 当场提示占用 / 再按不收起（27 项）
+python -u _check_hotkey_capture.py                 # 手动：组合被别的程序占着时也能录（真实按键，5 项）
 python -u test_lnk.py                              # .lnk 解析：纯 Python vs PowerShell（12 项，现场造快捷方式）
 python -u test_app_focus.py                        # 已运行则切换（19 项，自开测试窗口，不碰用户窗口）
 python -u test_update.py                           # 在线更新（50 项，假 GitHub 服务器，不联网、不真装）

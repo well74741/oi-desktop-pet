@@ -160,6 +160,56 @@ try:
         except Exception:
             pass
     G._kit.warn = real_warn
+
+    # ===== 四、组合被别的程序占着时也能录（低级键盘钩子）=====
+    # 真实按键那一半见 _check_hotkey_capture.py（会往前台发按键，不进自动测试）
+    print("\n--- 四、被占用的组合也能录 ---")
+    check("系统按键码 → 键名（和 parse 认的写法一致）",
+          [H._vk_name(v) for v in (0x20, 0x41, 0x31, 0x70, 0x7B, 0xC0)]
+          == ["Space", "A", "1", "F1", "F12", "`"])
+    e3 = H.HotkeyEdit()
+    check("录入框关掉了输入法（中文输入法开着时空格会被拿去选字）",
+          not e3.testAttribute(Qt.WA_InputMethodEnabled))
+    e3.show()
+    e3._install_hook()
+    hooked = bool(e3._hook)
+    e3.hide()
+    check("录入时挂上键盘钩子；窗口一藏就摘掉（不常驻监听键盘）",
+          hooked and not e3._hook)
+
+    d3 = G.SettingsDialog(G.load_settings(), pet=pet)
+    other = H.GlobalHotkey()
+    if other.register("Ctrl+Alt+Shift+F9")[0]:
+        d3._check_hotkey_free("Ctrl+Alt+Shift+F9")
+        check("录到一个被别人占着的组合 → 输入框旁当场提示（不等点确定）",
+              not d3.hk_warn.isHidden() and "占用" in d3.hk_warn.text(), d3.hk_warn.text())
+        other.unregister()
+        d3._check_hotkey_free("Ctrl+Alt+Shift+F9")
+        check("组合空出来了 → 提示消失", d3.hk_warn.isHidden())
+    d3._check_hotkey_free(COMBO)
+    check("录的就是桌宠自己正在用的组合 → 不提示占用", d3.hk_warn.isHidden())
+    d3.close()
+
+    # ===== 五、热键是"呼出"不是"开关" =====
+    print("\n--- 五、第二次按热键不收起 ---")
+
+    class FakeMenu:
+        def __init__(self):
+            self.is_visible_state = False
+            self.toggles = 0
+
+        def toggle_menu(self, sc):
+            self.toggles += 1
+            self.is_visible_state = not self.is_visible_state
+
+    pet.radial_menu = FakeMenu()
+    pet.settings["menu_hotkey_at_cursor"] = False
+    pet._on_hotkey()
+    check("第一次按：展开", pet.radial_menu.is_visible_state)
+    pet._on_hotkey()
+    check("第二次按：保持展开（以前用 toggle，第二次就收起了）",
+          pet.radial_menu.is_visible_state and pet.radial_menu.toggles == 1,
+          "toggle 调了 %d 次" % pet.radial_menu.toggles)
 finally:
     try:
         if pet._hotkey is not None:

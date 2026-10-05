@@ -6293,6 +6293,12 @@ class SettingsDialog(_DarkDialog):
         self.hk_at_cursor.setToolTip(
             "勾上：把桌宠移到鼠标位置再展开菜单（推荐）；取消：就在当前位置展开")
         hk_row.addWidget(self.hk_at_cursor)
+        self.hk_warn = QLabel("")
+        self.hk_warn.setStyleSheet("color:#f0a35e; font-size:11px;")
+        self.hk_warn.hide()
+        hk_row.addWidget(self.hk_warn)
+        self.hk_edit.captured.connect(self._check_hotkey_free)
+        self.hk_edit.textChanged.connect(lambda _t: self.hk_warn.hide())
         try:
             import hotkey as _hkmod
             if not _hkmod.supported():
@@ -6349,6 +6355,23 @@ class SettingsDialog(_DarkDialog):
 
         # 固定窗口大小，不允许缩放
         root.setSizeConstraint(QLayout.SetFixedSize)
+
+    def _check_hotkey_free(self, combo):
+        """录到组合就当场试注册：被别的程序占着的话现在就说，不等到点「确定」。"""
+        import hotkey as _hkmod
+        pet = getattr(self, "_pet", None)
+        cur = pet.active_hotkey() if pet is not None and hasattr(pet, "active_hotkey") else ""
+        if not combo or _hkmod.normalize(cur) == _hkmod.normalize(combo):
+            self.hk_warn.hide()
+            return
+        probe = _hkmod.GlobalHotkey()
+        ok, _msg = probe.register(combo)
+        probe.unregister()
+        if ok:
+            self.hk_warn.hide()
+        else:
+            self.hk_warn.setText("已被其他程序占用，换一个")
+            self.hk_warn.show()
 
     def _pause_pet_hotkey(self, on):
         pet = getattr(self, "_pet", None)
@@ -8135,8 +8158,12 @@ class GravityPet(QWidget):
                 half = self.pet_size // 2 + PET_SHADOW_MARGIN
                 self.move(self._clamp_to_desktop(QPoint(c.x() - half,
                                                         c.y() - half)))
-            self.radial_menu.toggle_menu(
-                list(self.settings.get("slot_shortcuts", [])))
+            # 热键是"呼出"，不是"开关"：菜单已经展开（或正在展开）时再按一次，只把它
+            # 挪到鼠标处，**不收起**。以前用的是 toggle_menu，第二次按就把菜单收了。
+            # 正在收起的过程中按下，toggle_menu 会反转成展开，正好是想要的。
+            if not self.radial_menu.is_visible_state:
+                self.radial_menu.toggle_menu(
+                    list(self.settings.get("slot_shortcuts", [])))
         except Exception:
             pass
 

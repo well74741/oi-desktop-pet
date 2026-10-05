@@ -15,7 +15,7 @@ import sys
 
 import threading
 
-from PyQt5.QtCore import QEvent, QObject, Qt, pyqtSignal
+from PyQt5.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import QLineEdit, QToolTip
 
 WM_HOTKEY = 0x0312
@@ -237,6 +237,46 @@ def combo_text(modifiers, qt_key):
     return "+".join(mods + [k])
 
 
+# ---------- 录入时的低级键盘钩子 ----------
+# 为什么需要：别的程序（输入法、启动器、截图工具……）已经 RegisterHotKey 占了某个组合
+# 时，系统会在按键送到任何窗口**之前**把它截走 —— 录入框只收得到 Ctrl、Alt，主键
+# 永远到不了。用户实测就是"Ctrl+Alt+Space 前两个键能识别到，空格识别不到"。
+# WH_KEYBOARD_LL 在系统热键处理之前就能看到按键，所以只在录入框有焦点时挂上，
+# 离开焦点立刻摘掉（不常驻，不监听平时的键盘）。
+_WH_KEYBOARD_LL = 13
+_WM_KEYDOWN, _WM_SYSKEYDOWN = 0x0100, 0x0104
+_VK_MODS = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C}
+_VK_NAME = {v: k for k, v in _NAMED.items() if k not in ("return", "escape")}
+
+
+def _vk_name(vk):
+    if 0x41 <= vk <= 0x5A or 0x30 <= vk <= 0x39:
+        return chr(vk)
+    n = _VK_NAME.get(vk, "")
+    return n.upper() if n.startswith("f") and n[1:].isdigit() else n.capitalize() if n.isalpha() else n
+
+
+class _KBDLL(ctypes.Structure):
+    _fields_ = [("vkCode", wt.DWORD), ("scanCode", wt.DWORD), ("flags", wt.DWORD),
+                ("time", wt.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+if supported():
+    _HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wt.WPARAM, wt.LPARAM)
+    _u32 = ctypes.windll.user32
+    _u32.SetWindowsHookExW.restype = ctypes.c_void_p
+    _u32.SetWindowsHookExW.argtypes = [ctypes.c_int, _HOOKPROC, ctypes.c_void_p, wt.DWORD]
+    _u32.CallNextHookEx.restype = ctypes.c_ssize_t
+    _u32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, wt.WPARAM, wt.LPARAM]
+    _u32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+    _u32.GetAsyncKeyState.restype = ctypes.c_short
+    ctypes.windll.kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+
+
+def _held(vk):
+    return bool(_u32.GetAsyncKeyState(vk) & 0x8000)
+
+
 class HotkeyEdit(QLineEdit):
     """快捷键录入框：点进去，**直接按下**组合键就录好，不用一个字一个字打。
 
@@ -248,12 +288,18 @@ class HotkeyEdit(QLineEdit):
     否则重新录入正在用的那个组合时，按下去就被全局热键截走、直接弹出菜单了。
     """
 
+    captured = pyqtSignal(str)      # 录到一个组合（调用方据此当场检查是否被占用）
+
     def __init__(self, parent=None, on_capture=None):
         super().__init__(parent)
         self._on_capture = on_capture
         self._before = ""
         self.setPlaceholderText("点这里，按下组合键")
         self.setClearButtonEnabled(True)
+        # 中文输入法开着时空格会被拿去选字/上屏，录入框里没有输入法的事
+        self.setAttribute(Qt.WA_InputMethodEnabled, False)
+        self._hook = None
+        self._hook_proc = None      # 必须持有引用，否则回调被回收 → 进程崩溃
         self.setToolTip("点一下，然后直接按下想用的组合键（如 Ctrl+Alt+Space）。\n"
                         "至少要带一个 Ctrl / Alt / Shift / Win。按 Backspace 清空 = 不用热键。")
 
@@ -268,13 +314,60 @@ class HotkeyEdit(QLineEdit):
         self._before = self.text()
         if callable(self._on_capture):
             self._on_capture(True)
+        self._install_hook()
 
     def focusOutEvent(self, ev):
         super().focusOutEvent(ev)
+        self._remove_hook()
         if self.text().endswith("…"):
             self.setText(self._before)
         if callable(self._on_capture):
             self._on_capture(False)
+
+    def hideEvent(self, ev):
+        self._remove_hook()            # 窗口直接关掉时 focusOut 不一定来
+        super().hideEvent(ev)
+
+    def _install_hook(self):
+        if not supported() or self._hook:
+            return
+        def proc(code, wparam, lparam):
+            try:
+                if code == 0 and wparam in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
+                    vk = ctypes.cast(lparam, ctypes.POINTER(_KBDLL)).contents.vkCode
+                    if vk not in _VK_MODS:
+                        mods = [n for vks, n in (((0x11,), "Ctrl"), ((0x12,), "Alt"),
+                                                 ((0x10,), "Shift"), ((0x5B, 0x5C), "Win"))
+                                if any(_held(v) for v in vks)]
+                        name = _vk_name(vk)
+                        if mods and name:
+                            # 有修饰键 + 认得的主键：录下来，并**吞掉**这次按键 ——
+                            # 不吞的话占着这个组合的那个程序会被触发
+                            combo = normalize("+".join(mods + [name]))
+                            QTimer.singleShot(0, lambda c=combo: self._captured(c))
+                            return 1
+            except Exception:
+                pass
+            return _u32.CallNextHookEx(None, code, wparam, lparam)
+        self._hook_proc = _HOOKPROC(proc)
+        self._hook = _u32.SetWindowsHookExW(
+            _WH_KEYBOARD_LL, self._hook_proc,
+            ctypes.windll.kernel32.GetModuleHandleW(None), 0) or None
+
+    def _remove_hook(self):
+        if self._hook:
+            try:
+                _u32.UnhookWindowsHookEx(self._hook)
+            except Exception:
+                pass
+        self._hook = None
+
+    def _captured(self, combo):
+        if not self.hasFocus():
+            return
+        self.setText(combo)
+        self._before = combo
+        self.captured.emit(combo)
 
     def keyPressEvent(self, ev):
         k = ev.key()
@@ -303,6 +396,7 @@ class HotkeyEdit(QLineEdit):
             return
         self.setText(normalize(txt))
         self._before = self.text()
+        self.captured.emit(self._before)
 
     def keyReleaseEvent(self, ev):
         if self.text().endswith("…"):
