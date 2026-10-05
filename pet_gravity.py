@@ -185,6 +185,15 @@ def extract_exe_icon(path: str, size: int = 32) -> QPixmap:
     return pm
 
 
+def _lnk_fast(path):
+    """纯 Python 读 .lnk 目标（见 lnk_target.py）；读不出返回 ""。"""
+    try:
+        import lnk_target
+        return lnk_target.target(path)
+    except Exception:
+        return ""
+
+
 def _resolve_lnk_target(lnk_path: str) -> str:
     """解析 .lnk 快捷方式的目标路径（带缓存，避免反复启动 PowerShell）"""
     if sys.platform != 'win32':
@@ -192,7 +201,12 @@ def _resolve_lnk_target(lnk_path: str) -> str:
     cached = _lnk_target_cache.get(lnk_path)
     if cached is not None:
         return cached
-    target = ''
+    # 先直接读 .lnk 文件（毫秒级）；读不出来的少数情况（只有 IDList 的应用商店
+    # 应用等）才起 PowerShell —— 原来每个都起，实测每个 0.52 秒
+    target = _lnk_fast(lnk_path)
+    if target:
+        _lnk_target_cache[lnk_path] = target
+        return target
     try:
         import subprocess
         ps = (
@@ -216,7 +230,11 @@ def _prewarm_lnk_cache(paths):
     pending = []
     for p in paths:
         if p and p.lower().endswith('.lnk') and p not in _lnk_target_cache:
-            pending.append(p)
+            t = _lnk_fast(p)          # 能直接读出来的当场填好，不进 PowerShell 批次
+            if t:
+                _lnk_target_cache[p] = t
+            else:
+                pending.append(p)
     if not pending:
         return
 
@@ -726,7 +744,9 @@ def load_settings() -> dict:
                 "update_auto": True, "update_skip": "",
                 # 全局热键：在任意程序里按下就在鼠标处唤出径向菜单
                 # （空字符串 = 不使用）。Windows 之外无效。
-                "menu_hotkey": "", "menu_hotkey_at_cursor": True}
+                "menu_hotkey": "", "menu_hotkey_at_cursor": True,
+                # 快捷启动：程序已经开着就切过去，不再多开（按住 Shift 点则强制新开）
+                "launch_focus_existing": True}
     if os.path.exists(path):
       with _SETTINGS_LOCK:
         saved = None
@@ -2396,6 +2416,10 @@ class RadialMenu(QWidget):
         if not path:
             self.hide_menu()
             return
+        # 已经开着的程序：切过去，不再多开一个（按住 Shift 点则照旧新开）
+        if self._focus_existing(path):
+            self.hide_menu()
+            return
         cwd = self._launch_cwd(path)
         try:
             if path.startswith("run://"):
@@ -2421,6 +2445,16 @@ class RadialMenu(QWidget):
             except Exception:
                 logger.exception("Failed to launch: %s", path)
         self.hide_menu()
+
+    def _focus_existing(self, path):
+        """设置里没关「已运行则切换」时，交给 app_focus 试一下。"""
+        try:
+            if not self.pet.settings.get("launch_focus_existing", True):
+                return False
+            import app_focus
+            return app_focus.try_focus(path, _resolve_lnk_target)
+        except Exception:
+            return False
 
     @staticmethod
     def _startfile_outside(path, cwd):

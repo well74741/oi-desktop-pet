@@ -96,6 +96,15 @@ class Widget(ModuleWidget):
             p = str(path or "").strip()
             if not p:
                 return
+            # 已经开着的程序切过去（和径向菜单同一套规则，见 app_focus.try_focus）
+            try:
+                import app_focus
+                import pet_gravity
+                if (pet_gravity.load_settings().get("launch_focus_existing", True)
+                        and app_focus.try_focus(p, pet_gravity._resolve_lnk_target)):
+                    return
+            except Exception:
+                pass
             cwd = self._safe_cwd(p)
             if p.startswith(("http://", "https://")):
                 webbrowser.open(p)
