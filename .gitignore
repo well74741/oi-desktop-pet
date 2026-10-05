@@ -8,7 +8,6 @@ dist/
 pet_settings.json*
 chat_history.json
 chat_summary.json
-config.yaml
 *_backup_*.zip
 *.zip
 todo_data.json

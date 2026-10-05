@@ -1,0 +1,9 @@
+# 桌宠配置文件
+
+pet:
+  size: 75               # 桌宠大小（像素）
+  opacity: 1.0           # 透明度（0-1）
+  image: "assets/yxm.webp" # 桌宠图片路径
+
+appearance:
+  icon: "assets/icon.ico" # 托盘图标
