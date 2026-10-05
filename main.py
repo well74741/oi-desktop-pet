@@ -256,6 +256,12 @@ class DesktopPetApp:
         self.tray_icon = None
         self._setup_tray()
         self.pet.show()
+        # 在线更新：启动 30 秒后检查一次，之后每 6 小时一次（见 update_ui.py）
+        try:
+            import update_ui
+            update_ui.start_scheduler(self.pet)
+        except Exception:
+            pass
 
     def _setup_tray(self):
         if not QSystemTrayIcon.isSystemTrayAvailable():

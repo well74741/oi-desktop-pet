@@ -21,7 +21,7 @@ KEEP_DEFAULT = 3
 # 每类一条正则：括号里必须是版本号
 PATTERNS = [
     ("便携版", re.compile(r"^oi桌宠(\d+\.\d+\.\d+)\.exe$")),
-    ("安装包", re.compile(r"^oi桌宠_Setup_v(\d+\.\d+\.\d+)\.exe$")),
+    ("安装包", re.compile(r"^(?:oi桌宠|oi-pet)_Setup_v(\d+\.\d+\.\d+)\.exe$")),
     ("源码包", re.compile(r"^oi桌宠_v(\d+\.\d+\.\d+)_源码\.zip$")),
 ]
 

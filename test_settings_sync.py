@@ -241,6 +241,22 @@ check("安装包：AppMutex 名字与 main.py 建的互斥体一致（%s）"
       _m is not None and _n is not None and _m.group(1) == _n.group(1))
 check("程序侧：启动时真的建了具名互斥体（文件锁安装程序看不见）",
       "_create_app_mutex()" in _main_src and "CreateMutexW" in _main_src)
+
+# ---------- 批处理 / 安装脚本的换行符 ----------
+# cmd 读纯 LF 的 .bat 会在某些位置把行切错：v0.9.39 打包时 build.bat 被写成了 LF，
+# 日志全是 'I_ONEDIR' / 'orlevel' 不是内部或外部命令，一条被切断的 echo 还真的执行了，
+# 在项目根目录建出一个字面上叫 %LOCALAPPDATA% 的文件夹。
+for _bf in ("build.bat", "oi桌宠.iss"):
+    _bb = open(os.path.join(HERE, _bf), "rb").read()
+    _crlf = _bb.count(b"\r\n")
+    _lf = _bb.count(b"\n") - _crlf
+    check("换行符：%s 是 CRLF（纯 LF 的批处理 cmd 会读错）" % _bf,
+          _crlf > 0 and _lf == 0, "CRLF %d / 纯LF %d" % (_crlf, _lf))
+_ga = os.path.join(HERE, ".gitattributes")
+_gat = open(_ga, encoding="utf-8").read() if os.path.exists(_ga) else ""
+check("换行符：.gitattributes 让 .bat 在任何人的电脑上都检出成 CRLF"
+      "（不靠各人的 core.autocrlf）",
+      "*.bat text eol=crlf" in _gat)
 check("程序侧：退出时关掉互斥体句柄（不然残留会误判为仍在运行）",
       "CloseHandle(_install_mutex)" in _main_src)
 

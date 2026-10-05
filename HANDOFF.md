@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.37 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.39 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -167,6 +167,70 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.39：在线更新（点版本号检查 + 启动/每 6 小时自动检查 + 下载进度 + 静默安装重启）2026-10-05】
+  - **版本号跳过 0.9.38**：0.9.38 是热键版，当时误传到了 0.9.37 的 Release 里、已经
+    被公开下载过。再发一个内容不同却同样叫 0.9.38 的版本，装过它的人会被判成"已是
+    最新"而收不到更新。所以 main 直接从 0.9.37 跳到 0.9.39。热键分支以后 rebase 过来
+    时版本号也要跟着往后排。
+  - 用户要求：设置窗右下角版本号可点击手动检查；每次启动和每隔一段时间自动检查；
+    更新过程要有弹窗和进度。
+  - 新增两个文件，**零新依赖**：
+    - `updater.py`（纯标准库、不碰 Qt，可单测）：查 GitHub Release、挑附件、边下边算
+      sha256、启动安装程序。
+    - `update_ui.py`：更新弹窗（检查 → 更新说明 → 下载进度/速度/可取消 → 校验 →
+      安装并重启）+ `UpdateScheduler`（启动 30 秒后查一次，之后每 6 小时；同一版本
+      每次运行只提醒一次；「跳过此版本」持久化；全屏时憋着，退出全屏再弹；检查失败
+      一律安静；源码运行不打扰）。
+  - 接线：设置窗 `version_label` 可点（悬停变蓝下划线，走 `eventFilter`）；`main.py`
+    在 `pet.show()` 之后 `update_ui.start_scheduler(pet)` —— **故意不挂在 GravityPet
+    构造里**，否则跑测试时也会去联网。设置新增 `update_auto`（默认开）、`update_skip`。
+  - **每条都查过出处的坑**：
+    - GitHub 会给附件改名（官方文档原话 "renames asset filenames that have special
+      characters, non-alphanumeric characters…"，实测「桌宠」变成「.」）→ 挑附件只认
+      "含 setup + 以 .exe 结尾"；`.iss` 的 `OutputBaseFilename` 改成纯英文
+      `oi-pet_Setup_v…`（`_prune_dist.py` 新旧两种名字都认）。
+    - 附件的 `digest` 字段文档说**可能为空** → 有就必须对上（对不上删掉不装），没有就
+      只核对大小并在界面上如实说明。
+    - 安装程序要管理员权限 → 必须 `os.startfile`（ShellExecute）才会弹 UAC，
+      subprocess 会报 740；UAC 点「否」是 winerror 1223，提示后**不退出桌宠**。
+    - 工作目录给下载目录，不给安装目录（v0.9.31 的 DLL 占用教训）。
+    - **静默安装必须带 `/NOCLOSEAPPLICATIONS`**：Inno 文档原话，CloseApplications=yes
+      且静默运行时 "Setup will always close and restart such applications" —— 也就是会
+      **不打招呼地关掉**占用文件的其他程序（当年的 Photoshop，没保存的工作就没了）。
+      旧版桌宠照样会被关：那是 PrepareToInstall 里的 taskkill，只针对我们自己的 exe。
+      故意**不加** `/SUPPRESSMSGBOXES`，万一有文件被占用要让用户看到提示。
+    - **静默装完自动重启要 `runasoriginaluser`**：Inno 文档原话，不带 postinstall 的
+      [Run] 条目 "runascurrentuser… This is the default behavior when the postinstall
+      flag is not used"，即**继承安装程序的管理员权限**。以管理员跑起来的桌宠能写
+      Program Files，`data_store._pick_data_dir` 会把数据存进安装目录、和原来
+      LOCALAPPDATA 里的设置"分家"。新增条目：`Flags: nowait skipifnotsilent
+      runasoriginaluser`（原来那条 postinstall 带 skipifsilent，静默时会被跳过）。
+  - **截图才发现的 bug**：换状态时旧按钮只 `deleteLater()`，要等事件循环空下来才真删，
+    这之前还挂在窗口上照样显示 —— 渲染出来新旧两排按钮叠在一起。改成当场
+    `hide()` + `setParent(None)` 再 deleteLater。加了回归断言，并做了**反面对照**：
+    换回旧写法时那条断言确实失败（换状态后可见 4 个按钮）。断言第一版检查太早还误报过
+    一次：往已显示的窗口里加按钮，Qt 把"显示"排到下一轮事件循环，要先 pump 一轮。
+    另修了截图里的观感问题：字体统一雅黑、说明框高度贴合内容、Markdown 标题压到
+    12px、下载开始后收起说明框。
+  - 新增 `test_update.py`（50 项，进自动套件 → 打包闸门会把关）：假 GitHub 服务器、
+    不联网、不真的启动安装程序。覆盖版本比较（0.10.0 > 0.9.99）、改名附件、各种 HTTP
+    错误、sha256 不符/下载不完整/中途取消都**不留残件**、UAC 拒绝、弹窗各状态按钮、
+    自动检查的去重/跳过/全屏延后/开关/源码模式、.iss 与 spec 的关键配置。
+  - **打包时踩的坑（是我自己弄坏的）**：用 Python 改 `build.bat` 时，`io.open` 读入把
+    CRLF 转成了 LF、`newline=""` 写回时没转回去，`build.bat` 变成纯 LF。cmd 读纯 LF
+    的批处理会在某些位置把行切错：日志全是 `'I_ONEDIR'` / `'orlevel'` 不是内部或外部
+    命令，`VER` 为空（产物叫 `oi-pet_Setup_v.exe`），**一条被切断的 echo 还真的执行了**，
+    在项目根目录建出一个字面上叫 `%LOCALAPPDATA%` 的文件夹（里面是个空 venv，已删）。
+    而且外层 PowerShell 退出码还是 0 —— 不看日志根本发现不了。
+    修：转回 CRLF；加 `.gitattributes`（`*.bat/*.cmd/*.iss/*.vbs text eol=crlf`）——
+    git 里存的本来就是 LF、靠本机 `core.autocrlf=true` 检出时转回，**别人克隆时没开
+    这个设置，拿到的 build.bat 天生就是坏的**；`test_settings_sync` 加断言守住。
+    以后用脚本改 .bat/.iss：按字节读写，或写回时 `newline="
+"`。
+  - **没法自动测、要人工走一遍的**：UAC → 静默安装 → 以普通用户身份重新打开桌宠。
+    需要两个都带在线更新的正式版本：装好 0.9.39，再发布 0.9.40，点版本号更新。
+    已安装的 0.9.37 及更早版本没有更新功能，**必须手动装一次 0.9.39**。
 
 - 【仓库整理 + 接上 GitHub（未发版，main 停在 v0.9.37）2026-10-05】
   - **远程仓库**：`https://github.com/well74741/oi-desktop-pet`（公开），分支 `main`。
@@ -2114,6 +2178,7 @@ python -u _check_launch_cwd.py                     # 手动：真起子进程验
 #   from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
 #   CArchiveReader(exe).extract('PYZ.pyz') → 落盘 → ZlibArchiveReader(...).extract('模块名')
 #   → marshal.loads → 递归看 co_names/co_varnames/co_consts 里有没有你的新函数名
+python -u test_update.py                           # 在线更新（50 项，假 GitHub 服务器，不联网、不真装）
 python -u _check_dock_life.py                      # 手动：贴边栏切站点/窗口被关掉/收起态（28 项，临时 profile，跑完即删）
 python -u _check_dock_drag.py                      # 手动：拖窗口时贴边栏的额外开销（8 项，A/B/C/D 四组对照，临时 profile）
 python -u _check_dock.py                           # 手动：贴边栏挂进真实 Edge 窗口验真（17 项，临时 profile，跑完即删）

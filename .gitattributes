@@ -1,0 +1,8 @@
+# Windows 批处理必须是 CRLF：cmd 读纯 LF 的 .bat 会在某些位置把行切错，
+# 表现成 'I_ONEDIR' / 'orlevel' 不是内部或外部命令（v0.9.39 打包时踩过）。
+# 写在这里而不是靠各人的 core.autocrlf：别人从 GitHub 克隆时没开那个设置，
+# 拿到的 build.bat 天生就是坏的。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf
+*.vbs text eol=crlf

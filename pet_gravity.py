@@ -721,7 +721,9 @@ def load_settings() -> dict:
                 "slot_shortcuts": [], "show_tooltips": True, "status_enabled": {},
                 "status_custom_items": [], "status_rules": [], "hidden_builtins": [],
                 "bubble_scale": 1.0, "pet_scale": 1.0,
-                "ai_profile": {}, "allow_ai_exec_modules": False}
+                "ai_profile": {}, "allow_ai_exec_modules": False,
+                # 在线更新：自动检查开关、用户跳过的版本（见 update_ui.py）
+                "update_auto": True, "update_skip": ""}
     if os.path.exists(path):
       with _SETTINGS_LOCK:
         saved = None
@@ -6253,8 +6255,12 @@ class SettingsDialog(_DarkDialog):
         btn_layout.addWidget(self.cb_autostart)
         btn_layout.addStretch()
         self.version_label = QLabel("v%s" % APP_VERSION)
-        self.version_label.setToolTip("oi桌宠当前版本")
-        self.version_label.setStyleSheet("color:#7f8aa0; font-size:10px;")
+        self.version_label.setToolTip("oi桌宠当前版本，点击检查更新")
+        self.version_label.setCursor(Qt.PointingHandCursor)
+        self.version_label.setStyleSheet(
+            "QLabel{color:#7f8aa0; font-size:10px;}"
+            "QLabel:hover{color:#4a90e2; text-decoration:underline;}")
+        self.version_label.installEventFilter(self)
         btn_layout.addWidget(self.version_label)
         for text, slot in [("确定", self._on_accept), ("取消", self.reject)]:
             b = QPushButton(text)
@@ -6336,6 +6342,14 @@ class SettingsDialog(_DarkDialog):
         全局那条提示规则（kit.TOOLTIP_QSS，由 main.py 挂在 QApplication 上）。
         """
         try:
+            if obj is getattr(self, "version_label", None):
+                from PyQt5.QtCore import QEvent as _QEv
+                if (ev.type() == _QEv.MouseButtonRelease
+                        and ev.button() == Qt.LeftButton):
+                    import update_ui
+                    update_ui.open_dialog(self, getattr(self, "_pet", None),
+                                          anchor=self.version_label)
+                    return True
             if obj is getattr(self, "_rules_title_label", None):
                 from PyQt5.QtCore import QEvent as _QEv
                 if ev.type() == _QEv.Enter:

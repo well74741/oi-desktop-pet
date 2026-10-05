@@ -72,5 +72,5 @@ echo [7/7] Pruning old artifacts in dist (keep latest 3 + current)...
 echo.
 echo Done:
 echo   dist\oi桌宠%VER%.exe          portable single file
-echo   dist\oi桌宠_Setup_v%VER%.exe        installer (folder build, faster start)
+echo   dist\oi-pet_Setup_v%VER%.exe        installer (folder build, faster start)
 endlocal

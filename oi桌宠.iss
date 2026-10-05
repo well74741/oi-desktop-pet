@@ -13,7 +13,8 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 UninstallDisplayIcon={app}\oi桌宠.exe
 OutputDir=dist
-OutputBaseFilename=oi桌宠_Setup_v{#MyAppVersion}
+; 纯英文：GitHub 会把附件名里的中文改掉（实测「桌宠」变成「.」），在线更新按 setup + .exe 认
+OutputBaseFilename=oi-pet_Setup_v{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -47,6 +48,11 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 
 [Run]
 Filename: "{app}\oi桌宠.exe"; Description: "立即运行 {#MyAppName}"; Flags: nowait postinstall skipifsilent
+; 在线更新是静默安装（/SILENT），上一行会被 skipifsilent 跳过，所以另起一行只在静默时运行。
+; **必须 runasoriginaluser**：不带 postinstall 的条目默认继承安装程序的管理员权限
+; （Inno 文档："This is the default behavior when the postinstall flag is not used"），
+; 以管理员身份跑起来的桌宠能写 Program Files，数据就会存进安装目录、和原来的设置"分家"。
+Filename: "{app}\oi桌宠.exe"; Flags: nowait skipifnotsilent runasoriginaluser
 
 [Code]
 procedure KillOldInstance;
