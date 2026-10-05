@@ -15,7 +15,8 @@ import sys
 
 import threading
 
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QEvent, QObject, Qt, pyqtSignal
+from PyQt5.QtWidgets import QLineEdit, QToolTip
 
 WM_HOTKEY = 0x0312
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN = 0x0001, 0x0002, 0x0004, 0x0008
@@ -189,3 +190,124 @@ class GlobalHotkey(QObject):
 
     def registered(self):
         return bool(self._id)
+
+
+
+# ---------- 录入框：点一下，按下组合键就录进去 ----------
+_QT_NAMED = {
+    Qt.Key_Space: "Space", Qt.Key_Tab: "Tab", Qt.Key_Return: "Enter",
+    Qt.Key_Enter: "Enter", Qt.Key_Escape: "Esc", Qt.Key_Insert: "Insert",
+    Qt.Key_Delete: "Delete", Qt.Key_Home: "Home", Qt.Key_End: "End",
+    Qt.Key_PageUp: "PageUp", Qt.Key_PageDown: "PageDown", Qt.Key_Up: "Up",
+    Qt.Key_Down: "Down", Qt.Key_Left: "Left", Qt.Key_Right: "Right",
+    Qt.Key_Backspace: "Backspace",
+    Qt.Key_QuoteLeft: "`", Qt.Key_Minus: "-", Qt.Key_Equal: "=",
+    Qt.Key_BracketLeft: "[", Qt.Key_BracketRight: "]", Qt.Key_Backslash: "\\",
+    Qt.Key_Semicolon: ";", Qt.Key_Apostrophe: "'", Qt.Key_Comma: ",",
+    Qt.Key_Period: ".", Qt.Key_Slash: "/",
+}
+_QT_MODS = ((Qt.ControlModifier, "Ctrl"), (Qt.AltModifier, "Alt"),
+            (Qt.ShiftModifier, "Shift"), (Qt.MetaModifier, "Win"))
+_MOD_KEYS = (Qt.Key_Control, Qt.Key_Alt, Qt.Key_Shift, Qt.Key_Meta,
+             Qt.Key_AltGr, Qt.Key_Super_L, Qt.Key_Super_R)
+# 修饰键本身被按下 / 松开时，Qt 报告的 modifiers() 里**可能还没算上 / 还没去掉**它
+# （Qt 文档：与平台有关）。所以按下时补上、松开时扣掉这个键自己的标志。
+_KEY_FLAG = {Qt.Key_Control: Qt.ControlModifier, Qt.Key_Alt: Qt.AltModifier,
+             Qt.Key_AltGr: Qt.AltModifier, Qt.Key_Shift: Qt.ShiftModifier,
+             Qt.Key_Meta: Qt.MetaModifier, Qt.Key_Super_L: Qt.MetaModifier,
+             Qt.Key_Super_R: Qt.MetaModifier}
+_ANY_MOD = Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier | Qt.MetaModifier
+
+
+def key_name(qt_key):
+    """Qt 键码 → 我们的键名（parse() 认得的写法）；认不出返回 ""。"""
+    if Qt.Key_A <= qt_key <= Qt.Key_Z or Qt.Key_0 <= qt_key <= Qt.Key_9:
+        return chr(qt_key)
+    if Qt.Key_F1 <= qt_key <= Qt.Key_F24:
+        return "F%d" % (qt_key - Qt.Key_F1 + 1)
+    return _QT_NAMED.get(qt_key, "")
+
+
+def combo_text(modifiers, qt_key):
+    """(Qt 修饰键, Qt 键码) → "Ctrl+Alt+Space"；主键认不出返回 ""。"""
+    k = key_name(qt_key)
+    if not k:
+        return ""
+    mods = [name for flag, name in _QT_MODS if modifiers & flag]
+    return "+".join(mods + [k])
+
+
+class HotkeyEdit(QLineEdit):
+    """快捷键录入框：点进去，**直接按下**组合键就录好，不用一个字一个字打。
+
+    - 只按了修饰键时先显示 "Ctrl+Alt+…"，松开没按主键就恢复原来的；
+    - 不带修饰键直接按 Backspace / Delete = 清空（不用热键）；
+    - 不带修饰键按别的键：提示"至少带一个 Ctrl / Alt / Shift / Win"，不录；
+    - 拦下 ShortcutOverride：不然 Alt+字母 这类组合会先被对话框的快捷键吃掉。
+    录入期间回调 on_capture(True/False)，调用方据此**暂停桌宠自己的全局热键** ——
+    否则重新录入正在用的那个组合时，按下去就被全局热键截走、直接弹出菜单了。
+    """
+
+    def __init__(self, parent=None, on_capture=None):
+        super().__init__(parent)
+        self._on_capture = on_capture
+        self._before = ""
+        self.setPlaceholderText("点这里，按下组合键")
+        self.setClearButtonEnabled(True)
+        self.setToolTip("点一下，然后直接按下想用的组合键（如 Ctrl+Alt+Space）。\n"
+                        "至少要带一个 Ctrl / Alt / Shift / Win。按 Backspace 清空 = 不用热键。")
+
+    def event(self, ev):
+        if ev.type() == QEvent.ShortcutOverride:
+            ev.accept()
+            return True
+        return super().event(ev)
+
+    def focusInEvent(self, ev):
+        super().focusInEvent(ev)
+        self._before = self.text()
+        if callable(self._on_capture):
+            self._on_capture(True)
+
+    def focusOutEvent(self, ev):
+        super().focusOutEvent(ev)
+        if self.text().endswith("…"):
+            self.setText(self._before)
+        if callable(self._on_capture):
+            self._on_capture(False)
+
+    def keyPressEvent(self, ev):
+        k = ev.key()
+        mods = ev.modifiers()
+        if k in _MOD_KEYS:
+            mods = mods | _KEY_FLAG.get(k, Qt.NoModifier)
+            names = [name for flag, name in _QT_MODS if mods & flag]
+            self.setText("+".join(names) + "+…" if names else self._before)
+            return
+        plain = not (mods & (Qt.ControlModifier | Qt.AltModifier |
+                             Qt.ShiftModifier | Qt.MetaModifier))
+        if plain and k in (Qt.Key_Backspace, Qt.Key_Delete):
+            self.clear()
+            self._before = ""
+            return
+        if plain and k == Qt.Key_Tab:
+            super().keyPressEvent(ev)       # 让 Tab 照常切到下一个控件
+            return
+        txt = combo_text(mods, k)
+        if not txt:
+            return                          # 认不出的键：什么都不做
+        if plain:
+            QToolTip.showText(self.mapToGlobal(self.rect().bottomLeft()),
+                              "至少要带一个 Ctrl / Alt / Shift / Win", self)
+            self.setText(self._before)
+            return
+        self.setText(normalize(txt))
+        self._before = self.text()
+
+    def keyReleaseEvent(self, ev):
+        if self.text().endswith("…"):
+            left = ev.modifiers() & ~_KEY_FLAG.get(ev.key(), Qt.NoModifier) & _ANY_MOD
+            names = [name for flag, name in _QT_MODS if left & flag]
+            # 还有修饰键按着就更新预览；全松开了还没按主键 → 恢复原来那个
+            self.setText("+".join(names) + "+…" if names else self._before)
+        super().keyReleaseEvent(ev)

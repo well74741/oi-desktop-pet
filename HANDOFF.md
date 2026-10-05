@@ -203,6 +203,31 @@
   - **测试**：新增 `test_lnk.py`（12 项，现场造快捷方式含中文路径/带参数/文件夹，
     不依赖本机开始菜单）、`test_app_focus.py`（19 项，自己开一个专用测试窗口来切，
     结束只关这一个进程，**绝不碰用户的窗口**），都进自动套件。
+  - **（发布前补）热键录入框 + 手动打包脚本**，用户反馈"快捷键设置似乎无法填入组合键，
+    而且里面的说明看不全"：
+    - 原来是普通文本框，**按**组合键不会输入任何字，只能一个字母一个字母打出
+      "Ctrl+Alt+Space"。新增 `hotkey.HotkeyEdit`：点进去**直接按下**组合键即录；只按
+      修饰键时预览 "Ctrl+Alt+…"；不带修饰键的单键不录（提示原因）；Backspace 清空 =
+      不用热键；拦下 `ShortcutOverride`，免得 Alt+字母 先被对话框快捷键吃掉。
+      修饰键自身按下/松开时 Qt 报的 modifiers() 可能还没算上/还没扣掉它（与平台有关），
+      所以按下补上、松开扣掉这个键自己的标志 —— 测试第一版就是卡在这儿（只显示 Ctrl+…）。
+    - 说明看不全：输入框写死 170px，占位文字被截成"如 Ctrl+Alt+Space，留空…"，还落到了
+      宋体。改为按最长组合 / 占位文字的实际宽度算，字体跟对话框一致（雅黑）。
+    - **顺带查出一个会让人以为"热键坏了"的 bug**：设好热键后再改**任何**设置点「确定」，
+      保存时会试注册一次热键，而占着那个组合的正是桌宠自己 → 报"已被其他程序占用"、
+      整个设置存不下来。现在和桌宠正在用的一样就不试（`GravityPet.active_hotkey()`）；
+      换成真被别人占着的组合仍会如实提示（测试里用真注册的组合验证过两边）。
+    - 录入时**暂停桌宠自己的全局热键**（`pause_hotkey`，设置窗 `done()` 里兜底恢复）：
+      不然重新录入正在用的那个组合，按下去会被系统级热键先截走、直接弹菜单。
+    - 新增 `test_hotkey.py`（19 项，进自动套件），会真注册 Ctrl+Alt+Shift+F11 并注销。
+    - 新增 `打包.bat`：双击即可，内部调 `build.bat`（测试闸门不变），中文提示、结束停住
+      窗口（双击运行时不停住窗口一闪就没了）、成功后打开 dist 并打印安装包 sha256（与
+      GitHub 附件的 digest 对照用）。踩坑：`for /f` 里的命令**只能有一对引号**，多对时 cmd
+      吃掉首尾两个、路径就断了，收尾读版本号失败显示成"v 打包完成"。改成和 build.bat
+      一样的 `'"%PYENV%" _make_version.py'`。已在真实 cmd 里端到端跑通，并纳入 CRLF 检查。
+    - **已知偶发**：`test_pet_anim` 的"左右贴边时改成竖向排列"在 3.12 全量跑时失败过一次
+      （竖排的位置为空），单独连跑 10 次全过、相关代码与测试自 0.9.39 未改。它依赖菜单在
+      屏幕上的实际位置，疑似负载高时摆位还没稳定就量了。暂未改，再出现就该给它加等待。
   - **偶发失败的计时断言**：`test_bubble` 的"两个方向帧数相当"原来要求差值 ≤ 3，
     打包环境负载高的一次跑出 展开 10 / 收起 14 → 误报（单独连跑 12 次都是 11~14）。
     动画按时间走、掉帧时两个方向一起少，改成**按比例**（少的 ≥ 多的 60% 且 ≥ 5 帧）。
@@ -2249,6 +2274,7 @@ python -u _check_launch_cwd.py                     # 手动：真起子进程验
 #   from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
 #   CArchiveReader(exe).extract('PYZ.pyz') → 落盘 → ZlibArchiveReader(...).extract('模块名')
 #   → marshal.loads → 递归看 co_names/co_varnames/co_consts 里有没有你的新函数名
+python -u test_hotkey.py                           # 热键录入框 + 保存时不误报占用（19 项，会真注册一个组合）
 python -u test_lnk.py                              # .lnk 解析：纯 Python vs PowerShell（12 项，现场造快捷方式）
 python -u test_app_focus.py                        # 已运行则切换（19 项，自开测试窗口，不碰用户窗口）
 python -u test_update.py                           # 在线更新（50 项，假 GitHub 服务器，不联网、不真装）
@@ -2260,6 +2286,7 @@ python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话�
 python _prune_dist.py [--dry] [保留版本数]         # 清理 dist 历史产物（打包脚本已自动调）
 python _make_backup.py                            # 备份（输出到 backups/，已被 .gitignore 忽略）
 python _make_source.py                            # 导出开发源码包（不含用户数据）
+打包.bat                                          # 双击打包：调 build.bat，中文提示、停住窗口、打印 sha256
 build.bat                                         # 打包：便携单文件 + 安装包（版本取自 APP_VERSION）
 .\启动桌宠.bat                                     # 启动桌宠（在项目根目录执行）
 git add -A; git commit -m "..."                   # 提交（如已 git init；已自动忽略用户数据）

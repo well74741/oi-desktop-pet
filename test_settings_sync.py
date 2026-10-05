@@ -246,7 +246,7 @@ check("程序侧：启动时真的建了具名互斥体（文件锁安装程序�
 # cmd 读纯 LF 的 .bat 会在某些位置把行切错：v0.9.39 打包时 build.bat 被写成了 LF，
 # 日志全是 'I_ONEDIR' / 'orlevel' 不是内部或外部命令，一条被切断的 echo 还真的执行了，
 # 在项目根目录建出一个字面上叫 %LOCALAPPDATA% 的文件夹。
-for _bf in ("build.bat", "oi桌宠.iss"):
+for _bf in ("build.bat", "打包.bat", "oi桌宠.iss"):
     _bb = open(os.path.join(HERE, _bf), "rb").read()
     _crlf = _bb.count(b"\r\n")
     _lf = _bb.count(b"\n") - _crlf

@@ -6277,10 +6277,16 @@ class SettingsDialog(_DarkDialog):
         hk_label = QLabel("唤出热键")
         hk_label.setToolTip("在任意程序里按下这个组合键，就在鼠标位置展开径向菜单")
         hk_row.addWidget(hk_label)
-        self.hk_edit = QLineEdit()
-        self.hk_edit.setPlaceholderText("如 Ctrl+Alt+Space，留空表示不用")
-        self.hk_edit.setFixedWidth(170)
+        import hotkey as _hkmod
+        self.hk_edit = _hkmod.HotkeyEdit(on_capture=self._pause_pet_hotkey)
         self.hk_edit.setText(str(settings.get("menu_hotkey", "") or ""))
+        # 字体跟对话框其他控件一致（不设的话这里会落到宋体）；宽度按要显示的最长
+        # 组合算，不再写死 —— 原来写死 170，占位说明被截成"如 Ctrl+Alt+Space，留空…"
+        self.hk_edit.setStyleSheet("font-family:'%s';" % _kit._FONT)
+        _fm = self.hk_edit.fontMetrics()
+        self.hk_edit.setFixedWidth(max(
+            _fm.horizontalAdvance(t) for t in
+            ("Ctrl+Alt+Shift+PageDown", self.hk_edit.placeholderText())) + _kit.ui(46))
         hk_row.addWidget(self.hk_edit)
         self.hk_at_cursor = QCheckBox("在鼠标处弹出")
         self.hk_at_cursor.setChecked(bool(settings.get("menu_hotkey_at_cursor", True)))
@@ -6343,6 +6349,15 @@ class SettingsDialog(_DarkDialog):
 
         # 固定窗口大小，不允许缩放
         root.setSizeConstraint(QLayout.SetFixedSize)
+
+    def _pause_pet_hotkey(self, on):
+        pet = getattr(self, "_pet", None)
+        if pet is not None and hasattr(pet, "pause_hotkey"):
+            pet.pause_hotkey(on)
+
+    def done(self, r):
+        self._pause_pet_hotkey(False)
+        super().done(r)
 
     def _clear_slots(self):
         if not self.slot_shortcuts and not self.preview.slot_shortcuts:
@@ -6557,12 +6572,17 @@ class SettingsDialog(_DarkDialog):
                           "（Ctrl / Alt / Shift / Win）加一个主键。")
                 return
             _spec = _hkmod.normalize(_spec)
-            _probe = _hkmod.GlobalHotkey()
-            _ok, _msg = _probe.register(_spec)
-            _probe.unregister()
-            if not _ok:
-                _kit.warn(self, "这个热键用不了", _msg)
-                return
+            # 和桌宠正在用的一样 → 不用试：试了必然"被占用"，占着它的就是桌宠自己。
+            # 以前没判断这个，设好热键后再改任何设置点「确定」都会报占用、存不下来。
+            _pet = getattr(self, "_pet", None)
+            _cur = _pet.active_hotkey() if _pet is not None and hasattr(_pet, "active_hotkey") else ""
+            if _hkmod.normalize(_cur) != _spec:
+                _probe = _hkmod.GlobalHotkey()
+                _ok, _msg = _probe.register(_spec)
+                _probe.unregister()
+                if not _ok:
+                    _kit.warn(self, "这个热键用不了", _msg)
+                    return
         self.settings["menu_hotkey"] = _spec
         self.settings["menu_hotkey_at_cursor"] = self.hk_at_cursor.isChecked()
         # 气泡 / 桌宠 两档尺寸（档位变化由 GravityPet._apply_pet_settings 在设置窗
@@ -8074,6 +8094,31 @@ class GravityPet(QWidget):
                 QTimer.singleShot(0, lambda m=msg: Toast(m, self._menu_anchor()))
         except Exception:
             self._hotkey = None
+
+    def pause_hotkey(self, pause):
+        """录入新热键时暂停桌宠自己的全局热键，录完恢复。
+
+        不暂停的话，重新录入**正在用的那个**组合时，按下去会被全局热键先截走
+        （系统级的，比输入框先收到），直接弹出菜单，输入框什么都收不到。
+        """
+        try:
+            if pause:
+                if self._hotkey is not None and self._hotkey.registered():
+                    self._hotkey.unregister()
+                    self._hotkey_paused = True
+            elif getattr(self, "_hotkey_paused", False):
+                self._hotkey_paused = False
+                self._hotkey_spec = ""          # 逼 _apply_hotkey 重新注册一遍
+                self._apply_hotkey()
+        except Exception:
+            pass
+
+    def active_hotkey(self):
+        """桌宠此刻正占着（或暂停中）的热键组合；没有返回空串。"""
+        if self._hotkey is not None and (self._hotkey.registered()
+                                         or getattr(self, "_hotkey_paused", False)):
+            return self._hotkey_spec
+        return ""
 
     def _on_hotkey(self):
         """热键按下：把桌宠挪到鼠标处（可选）再展开菜单。
