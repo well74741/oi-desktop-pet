@@ -9,23 +9,46 @@
 
 提示部分回归的是「模块列表」标题同时弹两个 tooltip（一个黄底一个深色）。
 
-运行：python test_pet_anim.py（离屏，不创建桌宠本体，只驱动倾角补间；
-设置窗用空配置构造，不读写 pet_settings.json）。
+运行：python test_pet_anim.py（离屏；第 9/11 节会真的造 GravityPet，所以
+**用户数据先隔离到临时沙箱**，见下方）。
 """
+import json
 import math
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PyQt5.QtCore import QElapsedTimer
-from PyQt5.QtWidgets import QApplication
+# ---- 隔离用户数据 ----
+# 这里会造真的 GravityPet，构造时会 load_settings()。以前没隔离，读的是开发者
+# **本机真实的 pet_settings.json**：本地设的是动图所以跑 52 项，全新克隆里没有
+# 那份设置、默认是静态图，第 11 节 4 条动图断言就被静默跳过（49 项）——
+# 同一份代码在不同机器上测的东西不一样，而且离"写坏真实设置"只差一行。
+import data_store                                   # noqa: E402
+
+SAND = tempfile.mkdtemp(prefix="oi_petanim_")
+data_store.DATA_DIR = SAND
+# 显式指定多帧动图，第 11 节的播放断言在哪台机器上都会真的跑
+with open(os.path.join(SAND, "pet_settings.json"), "w", encoding="utf-8") as _f:
+    json.dump({"pet_image": "assets/yxm.webp"}, _f)
+
+from PyQt5.QtCore import QElapsedTimer               # noqa: E402
+from PyQt5.QtWidgets import QApplication             # noqa: E402
 
 app = QApplication([])
 
-import pet_gravity as G
+import pet_gravity as G                              # noqa: E402
+
+_cfg = G.get_config_path()
+if os.path.abspath(_cfg).lower() != os.path.join(SAND, "pet_settings.json").lower():
+    # 宁可不测，也绝不碰用户真实设置
+    print("隔离失败，配置路径落在 %s，已中止" % _cfg)
+    shutil.rmtree(SAND, ignore_errors=True)
+    sys.exit(2)
 
 PASS, FAIL = [], []
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -359,11 +382,14 @@ if anim is not None and len(getattr(anim, "_frames", [])) > 1:
     check("动图：重新显示立刻恢复，且从当前帧接着放",
           anim._timer.isActive() and anim._idx == _idx)
 else:
-    # 默认桌宠图是多帧 webp；万一换成静态图，这几条就没得测
-    check("动图：当前桌宠图不是多帧动图，跳过播放相关断言", True)
+    # 沙箱里**明确指定了**多帧 webp，走到这里就是真出了问题（图没加载成动图），
+    # 不能再像以前那样记一条"跳过"了事 —— 那正是本地 52 项、克隆里 49 项还全绿的原因
+    check("动图：沙箱指定的多帧 webp 应当加载成动图（否则播放断言全被跳过）", False,
+          "anim=%r" % (anim,))
 pet_v.close()
 app.processEvents()
 
+shutil.rmtree(SAND, ignore_errors=True)
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:
     print("失败项：" + "、".join(FAIL))

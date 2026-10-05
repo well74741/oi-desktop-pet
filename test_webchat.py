@@ -259,6 +259,9 @@ check("高亮：跟着活动站点走",
       and "rgba(74,144,226,150)" not in bar._tiles["DeepSeek"].styleSheet())
 
 # ---------- 10. 「打开」入口：不弹列表，直接开上次那个 ----------
+# 先把模式钉死在出厂默认（贴边栏），别让本机设置决定走哪条路（见下方两种模式的说明）
+_real_dock_mode = webchat_ui.dock_mode
+webchat_ui.dock_mode = lambda: True
 OPENED = []
 webchat_ui.opener().open = (lambda site, size, finished=None:
                             (OPENED.append((site, size)), True)[1])
@@ -272,12 +275,25 @@ check("打开：没有窗口时开上次用的站点",
       OPENED and OPENED[-1][0]["name"] == "Kimi")
 # 开窗尺寸按模式分：旧架构有网页容器，就按容器尺寸开（省一次回流）；
 # 贴边栏模式下没有容器（浏览器窗口自己就是那个窗口），用上次记住的尺寸。
-if webchat_ui.dock_mode():
-    check("打开（贴边栏模式）：按上次记住的窗口尺寸开",
-          OPENED[-1][1] == L.preferred_size())
-else:
-    check("打开（宿主模式）：按网页容器的尺寸开窗（省一次回流）",
-          OPENED[-1][1] == STATE["client"])
+#
+# **两种模式都要明确测**。以前写的是 `if webchat_ui.dock_mode(): ... else: ...`，
+# 而那时 dock_mode() 读的是开发者**本机真实设置**，所以只测得到本机碰巧开着的那
+# 一种 —— 换台机器测的就是另一条分支，另一条永远没人测。
+for _mode in (True, False):
+    webchat_ui.dock_mode = lambda m=_mode: m
+    OPENED.clear()
+    STATE["last"] = "Kimi"
+    STATE["tracked"] = {}
+    STATE["active"] = (None, None)
+    webchat_ui.open_webchat(None)
+    if _mode:
+        check("打开（贴边栏模式）：按上次记住的窗口尺寸开",
+              bool(OPENED) and OPENED[-1][1] == L.preferred_size())
+    else:
+        check("打开（宿主模式）：按网页容器的尺寸开窗（省一次回流）",
+              bool(OPENED) and OPENED[-1][1] == STATE["client"])
+# 后面的用例按出厂默认（贴边栏）跑，不再看本机设置
+webchat_ui.dock_mode = lambda: True
 
 STATE["last"] = "已经删掉的站"
 webchat_ui.open_webchat(None)
@@ -502,6 +518,8 @@ check("贴边栏：挂接掉了会重新挂（Edge 重建窗口）",
 check("贴边栏：默认收成窄边，鼠标移上去才展开（不长期盖住页面）",
       "EDGE_W" in _src_dock and "enterEvent" in _src_dock)
 
+# 这一段测的就是**真实的** dock_mode()（读设置开关的那个），把上面钉死的替身还回去
+webchat_ui.dock_mode = _real_dock_mode
 _real_ls = None
 try:
     import pet_gravity as _PGW
