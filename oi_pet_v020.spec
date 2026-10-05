@@ -79,7 +79,7 @@ def _dynamic_deps():
 # 组件工具包与聚合AI 启动器/界面：运行期动态或延迟导入，需显式打包
 # autostart 是函数里惰性 import 的，静态分析看不见，必须显式带上
 hiddenimports = [
-        'updater', 'update_ui',"widgets.kit", "webchat_launcher", "webchat_ui",
+        'updater', 'update_ui', 'hotkey',"widgets.kit", "webchat_launcher", "webchat_ui",
                  "webchat_dock",
                  "autostart"] + _dynamic_deps()
 

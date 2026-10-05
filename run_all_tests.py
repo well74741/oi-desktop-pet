@@ -88,6 +88,7 @@ def main():
           "_check_dock_life.py（贴边栏切站点/被关掉/收起态）、"
           "_check_dock_drag.py（拖窗口时贴边栏的开销）、"
           "_check_ai_tools.py（AI 工具对话：超时/请求次数/误删防护）、"
+          "_check_hotkey.py（全局热键：解析/注册/冲突/线程）、"
           "_check_chatpanel.py（对话面板几何）")
     return 0
 

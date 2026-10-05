@@ -723,7 +723,10 @@ def load_settings() -> dict:
                 "bubble_scale": 1.0, "pet_scale": 1.0,
                 "ai_profile": {}, "allow_ai_exec_modules": False,
                 # 在线更新：自动检查开关、用户跳过的版本（见 update_ui.py）
-                "update_auto": True, "update_skip": ""}
+                "update_auto": True, "update_skip": "",
+                # 全局热键：在任意程序里按下就在鼠标处唤出径向菜单
+                # （空字符串 = 不使用）。Windows 之外无效。
+                "menu_hotkey": "", "menu_hotkey_at_cursor": True}
     if os.path.exists(path):
       with _SETTINGS_LOCK:
         saved = None
@@ -6234,6 +6237,34 @@ class SettingsDialog(_DarkDialog):
         )
 
         # 确定/取消 + 标签 + 拖尾同行（拖尾并入本行，省一行竖向空间）
+        # 全局热键：在任意程序里按下就能唤出菜单（仅 Windows）
+        hk_row = QHBoxLayout()
+        hk_row.setSpacing(6)
+        hk_label = QLabel("唤出热键")
+        hk_label.setToolTip("在任意程序里按下这个组合键，就在鼠标位置展开径向菜单")
+        hk_row.addWidget(hk_label)
+        self.hk_edit = QLineEdit()
+        self.hk_edit.setPlaceholderText("如 Ctrl+Alt+Space，留空表示不用")
+        self.hk_edit.setFixedWidth(170)
+        self.hk_edit.setText(str(settings.get("menu_hotkey", "") or ""))
+        hk_row.addWidget(self.hk_edit)
+        self.hk_at_cursor = QCheckBox("在鼠标处弹出")
+        self.hk_at_cursor.setChecked(bool(settings.get("menu_hotkey_at_cursor", True)))
+        self.hk_at_cursor.setToolTip(
+            "勾上：把桌宠移到鼠标位置再展开菜单（推荐）；取消：就在当前位置展开")
+        hk_row.addWidget(self.hk_at_cursor)
+        try:
+            import hotkey as _hkmod
+            if not _hkmod.supported():
+                self.hk_edit.setEnabled(False)
+                self.hk_at_cursor.setEnabled(False)
+                hk_label.setToolTip("全局热键仅 Windows 可用")
+        except Exception:
+            self.hk_edit.setEnabled(False)
+        hk_row.addStretch()
+        right_col.addLayout(hk_row)
+
+
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
         self.cb_tooltips = QCheckBox("标签")
@@ -6481,6 +6512,25 @@ class SettingsDialog(_DarkDialog):
                           if r.get("builtin") == "mood"), None)
         self.settings["mood_enabled"] = bool(mood_rule.get("enabled", True)) if mood_rule else True
         self.settings["bubble_enabled"] = self.bubble_cb.isChecked()
+        # 热键：先试注册，注册不上就提示并把设置改回去。静默存下一个用不了的热键
+        # 最坑 —— 用户会以为"设了但没反应"，反而更难查。
+        import hotkey as _hkmod
+        _spec = self.hk_edit.text().strip()
+        if _spec:
+            if not _hkmod.parse(_spec):
+                _kit.warn(self, "热键格式不对",
+                          "写法如 Ctrl+Alt+Space：至少一个修饰键"
+                          "（Ctrl / Alt / Shift / Win）加一个主键。")
+                return
+            _spec = _hkmod.normalize(_spec)
+            _probe = _hkmod.GlobalHotkey()
+            _ok, _msg = _probe.register(_spec)
+            _probe.unregister()
+            if not _ok:
+                _kit.warn(self, "这个热键用不了", _msg)
+                return
+        self.settings["menu_hotkey"] = _spec
+        self.settings["menu_hotkey_at_cursor"] = self.hk_at_cursor.isChecked()
         # 气泡 / 桌宠 两档尺寸（档位变化由 GravityPet._apply_pet_settings 在设置窗
         # 关闭后热更新，不需要重启）
         self.settings["bubble_scale"] = UI_SCALE_OPTIONS[self._bubble_slider.value()][1]
@@ -6836,6 +6886,8 @@ class GravityPet(QWidget):
         self.radial_menu = RadialMenu(self)
         # 布局版气泡（Qt 布局引擎排布内容）为默认实现
         self.status_bubble = StatusBubbleLayout(self)
+        self._hotkey = None      # 全局热键（见 _apply_hotkey）
+        self._hotkey_spec = ""
         self._mood_bubble = MoodBubble(self)
         self._mood_timer = QTimer(self)
         self._mood_timer.timeout.connect(self._maybe_show_mood)
@@ -7961,6 +8013,61 @@ class GravityPet(QWidget):
         self._applied_pet_scale = new_p
         return bubble_changed, pet_changed
 
+    # ---------- 全局热键 ----------
+    def _apply_hotkey(self):
+        """按设置注册/注销全局热键。设置里改了组合键就重来一遍。"""
+        spec = str(self.settings.get("menu_hotkey", "") or "").strip()
+        if spec == self._hotkey_spec:
+            return
+        self._hotkey_spec = spec
+        try:
+            if self._hotkey is not None:
+                self._hotkey.unregister()
+                self._hotkey = None
+            if not spec:
+                return
+            import hotkey as _hk
+            if not _hk.supported():
+                return
+            if self._hotkey is None:
+                self._hotkey = _hk.GlobalHotkey(self)
+                self._hotkey.pressed.connect(self._on_hotkey)
+            ok, msg = self._hotkey.register(spec)
+            if not ok:
+                # 注册失败就如实说：被别的程序占用是常见情况，静默失败会让人
+                # 以为"设置了但没反应"，反而更难查
+                self._hotkey = None
+                QTimer.singleShot(0, lambda m=msg: Toast(m, self._menu_anchor()))
+        except Exception:
+            self._hotkey = None
+
+    def _on_hotkey(self):
+        """热键按下：把桌宠挪到鼠标处（可选）再展开菜单。
+
+        菜单是**相对桌宠**定位的（每帧 sync_to_pet），所以"在鼠标处呼出"最简单
+        可靠的实现就是把桌宠挪过去 —— 不用给菜单加一套独立的定位逻辑。
+        """
+        try:
+            if self.radial_menu is None:
+                return
+            if self.settings.get("menu_hotkey_at_cursor", True):
+                from PyQt5.QtGui import QCursor
+                c = QCursor.pos()
+                half = self.pet_size // 2 + PET_SHADOW_MARGIN
+                self.move(self._clamp_to_desktop(QPoint(c.x() - half,
+                                                        c.y() - half)))
+            self.radial_menu.toggle_menu(
+                list(self.settings.get("slot_shortcuts", [])))
+        except Exception:
+            pass
+
+    def _menu_anchor(self):
+        """弹提示用的锚点（桌宠中心）。"""
+        try:
+            return self.mapToGlobal(QPoint(self.width() // 2, self.height() // 2))
+        except Exception:
+            return QPoint(0, 0)
+
     def _apply_pet_settings(self):
         from widgets import kit as _kit
         bubble_changed, pet_scale_changed = self._apply_ui_scales()
@@ -8000,6 +8107,7 @@ class GravityPet(QWidget):
                                           self.settings.get("status_rules"))
         self._mood_enabled = self.settings.get("mood_enabled", True)
         self.bubble_enabled = self.settings.get("bubble_enabled", True)
+        self._apply_hotkey()
         if menu_was_visible and self.radial_menu:
             shortcuts = list(self.settings.get("slot_shortcuts", []))
             QTimer.singleShot(0, lambda: self.radial_menu.show_menu(shortcuts))
