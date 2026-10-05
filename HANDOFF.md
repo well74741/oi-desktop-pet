@@ -168,10 +168,17 @@
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
 
-- 【仓库整理 + 准备上传 GitHub（未发版，master 停在 v0.9.37）2026-10-05】
+- 【仓库整理 + 接上 GitHub（未发版，main 停在 v0.9.37）2026-10-05】
+  - **远程仓库**：`https://github.com/well74741/oi-desktop-pet`（公开），分支 `main`。
+    本地分支已从 master 改名为 main 并跟踪 origin/main。GitHub 上原本只有一个
+    `initial import (v0.8.2)`，和本地历史不相关，用 `merge -s ours
+    --allow-unrelated-histories` 接上：文件内容以本地 v0.9.37 为准一字不变，
+    v0.8.2 保留为历史起点，推送是快进、**没有强制推送**。
+    `D:\@AItest\同步开发\oi-desktop-pet` 是当时从 GitHub 拉的一份副本，
+    **不要在那里开发**（没有历史、没有构建环境），开发只在本文件夹。
   - **v0.9.38（全局热键）暂缓发布，完整保留在 `feature/hotkey` 分支 + `v0.9.38` 标签**，
-    备份 zip 也在 `backups/` 里。master 已还原到 v0.9.37。以后要继续热键：
-    `git checkout feature/hotkey && git rebase master`（master 上新加的几个仓库整理
+    备份 zip 也在 `backups/` 里。main 已还原到 v0.9.37。以后要继续热键：
+    `git checkout feature/hotkey && git rebase main`（master 上新加的几个仓库整理
     提交需要带过去）。热键的"真人按键"那一步还没人工验证过，见 v0.9.38 的条目。
   - 上传前做了泄密审计：用户本机真实 API Key 拿去搜**全部 26 个历史版本** —— 0 处；
     历史里从没提交过用户数据、安装包、压缩包；整个 .git 仅 1.4 MB。
