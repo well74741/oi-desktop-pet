@@ -168,6 +168,32 @@
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
 
+- 【仓库整理 + 准备上传 GitHub（未发版，master 停在 v0.9.37）2026-10-05】
+  - **v0.9.38（全局热键）暂缓发布，完整保留在 `feature/hotkey` 分支 + `v0.9.38` 标签**，
+    备份 zip 也在 `backups/` 里。master 已还原到 v0.9.37。以后要继续热键：
+    `git checkout feature/hotkey && git rebase master`（master 上新加的几个仓库整理
+    提交需要带过去）。热键的"真人按键"那一步还没人工验证过，见 v0.9.38 的条目。
+  - 上传前做了泄密审计：用户本机真实 API Key 拿去搜**全部 26 个历史版本** —— 0 处；
+    历史里从没提交过用户数据、安装包、压缩包；整个 .git 仅 1.4 MB。
+    注意正则检查是**带对照**的：先确认正则能认出本机那把真 key，再拿它扫历史。
+  - dist/（142 MB 安装包）、build*、备份 zip、webchat_profile 等**全部被 .gitignore
+    挡住**，真正推送的只有约 70 个文件、1.7 MB。
+  - **`config.yaml` 纳入版本库**：它只是默认配置，却被当成用户数据忽略了。全新克隆后
+    默认桌宠图会变、安装包构建会失败（.iss 第 36 行要打包它）。
+  - **两个测试原来读的是开发者本机的真实设置**（用全新克隆复验时发现）：
+    `test_pet_anim` 没进沙箱，本地 52 项、克隆里 49 项且**全绿**（4 条动图断言被
+    "跳过"了）；`test_webchat` 的 `if dock_mode()` 只测得到本机开着的那种模式。
+    都改成了确定性的：沙箱 + 显式指定动图；两种模式各明确跑一遍（宿主模式那条
+    分支第一次被真正测到）。本地与克隆现在结果完全一致。
+  - 项目根目录整理：81 个备份 zip（44 MB）移进 `backups/`，`_make_backup.py` 以后
+    直接写那里；dist 里便携版运行留下的用户数据（含 API Key 的 pet_settings.json 等
+    4 个）移进 `backups/dist_便携版残留数据/`；删掉 build/、build_out/、__pycache__
+    （81 MB，打包时自动重建）。根目录的 pet_settings.json / *_data.json 是**源码模式
+    运行时的真实数据**，没动。
+  - 教训：`git ls-files` 默认会把中文文件名转义成 `"oiæ¡…"`，拿它做集合
+    比对会把 `oi桌宠.iss` 等误判成"未跟踪"。要么 `git -c core.quotepath=false`，要么
+    用 `git ls-files --error-unmatch -- 文件名` 逐个问。
+
 - 【v0.9.37：修好 AI 写模块"调用工具失败"，顺带堵掉一个会误删模块的坑 2026-10-05】
   - 用户反馈（另一台电脑上）："我用 ai 对话帮我写个模块，回复显示调用工具失败。"
     本机没有现场记录（对话记录在用户数据目录，那份是空的），所以改成**用假大模型
@@ -2087,7 +2113,7 @@ python -u _check_dock.py                           # 手动：贴边栏挂进真
 python -u _check_host.py                           # 手动：真实 Edge --app 窗口粘住宿主验真（25 项，临时 profile，跑完即删）
 python -u _check_chatpanel.py [气泡档位]           # 手动：量 AI 对话面板收起/展开的几何，查裁切与错位
 python _prune_dist.py [--dry] [保留版本数]         # 清理 dist 历史产物（打包脚本已自动调）
-python _make_backup.py                            # 备份
+python _make_backup.py                            # 备份（输出到 backups/，已被 .gitignore 忽略）
 python _make_source.py                            # 导出开发源码包（不含用户数据）
 build.bat                                         # 打包：便携单文件 + 安装包（版本取自 APP_VERSION）
 .\启动桌宠.bat                                     # 启动桌宠（在项目根目录执行）

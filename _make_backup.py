@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""打包备份桌宠项目（排除缓存/日志/旧备份），输出到工作区。"""
+"""打包备份桌宠项目（排除缓存/日志/旧备份），输出到 backups/。"""
 
 import datetime
 import os
 import zipfile
 
 SRC = os.path.dirname(os.path.abspath(__file__))
-DST_DIR = SRC
+# 备份统一放进 backups/（已被 .gitignore 忽略、也被下面的 skip_dirs 跳过），
+# 不再堆在项目根目录 —— 以前根目录攒了 80 多个 zip。
+DST_DIR = os.path.join(SRC, "backups")
 
 skip_dirs = {"__pycache__", ".git", ".claude", ".codex", ".agents",
              "backups", "build", "build_out", "dist",
@@ -16,6 +18,7 @@ skip_ext = {".pyc", ".pyo", ".zip", ".log"}
 
 def main():
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(DST_DIR, exist_ok=True)
     dst = os.path.join(DST_DIR, "oi桌宠_backup_%s.zip" % stamp)
     count = 0
     with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
