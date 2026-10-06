@@ -196,11 +196,17 @@ try:
     class FakeMenu:
         def __init__(self):
             self.is_visible_state = False
+            self._animating = False
             self.toggles = 0
+            self.replays = 0
 
         def toggle_menu(self, sc):
             self.toggles += 1
             self.is_visible_state = not self.is_visible_state
+
+        def show_menu(self, sc):
+            self.replays += 1
+            self.is_visible_state = True
 
     pet.radial_menu = FakeMenu()
     pet.settings["menu_hotkey_at_cursor"] = False
@@ -210,6 +216,11 @@ try:
     check("第二次按：保持展开（以前用 toggle，第二次就收起了）",
           pet.radial_menu.is_visible_state and pet.radial_menu.toggles == 1,
           "toggle 调了 %d 次" % pet.radial_menu.toggles)
+    check("第二次按：重播展开动画（以前只把菜单挪过去，是静态的）",
+          pet.radial_menu.replays == 1, "重播 %d 次" % pet.radial_menu.replays)
+    pet.radial_menu._animating = True
+    pet._on_hotkey()
+    check("正在展开时连按：不从头重来", pet.radial_menu.replays == 1)
 finally:
     try:
         if pet._hotkey is not None:

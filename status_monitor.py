@@ -34,6 +34,7 @@ import urllib.error
 import weakref
 
 import data_store
+import module_templates as _mt
 
 from PyQt5.QtCore import (Qt, QTimer, QPoint, QPointF, QRect, QRectF, QSize,
                           QObject, QEvent, pyqtSignal)
@@ -538,12 +539,7 @@ def _ai_exec_allowed():
 
 
 # 这些模板的脚本 code 由模板写死（非 AI 提供），即使 type=script 也安全，AI 可直接建
-_SAFE_SCRIPT_TEMPLATES = {
-    "counter", "todo", "stats",
-    # 组件类模板（_widget_template 生成，code 固定为一个字符串字面量）
-    "notes", "calc", "tomato", "health", "launcher", "tokenmeter",
-    "canvas", "perler",
-}
+_SAFE_SCRIPT_TEMPLATES = _mt.safe_script_keys()
 
 
 def _add_rule(rule, from_template=None):
@@ -611,172 +607,9 @@ def _tool_add_module(args):
 
 
 # ==================== 模块模板库 ====================
-
-MODULE_TEMPLATES = {
-    "clock": {
-        "desc": "当前时间（每秒刷新）",
-        "params": [],
-        "build": lambda name, p: {
-            "name": name, "interval": 1, "enabled": True, "embed": True,
-            "fallback": "—",
-            "source": {"type": "clock", "mode": "time"}}},
-    "countdown": {
-        "desc": "倒计时到目标时刻（参数 target，如 18:00）",
-        "params": ["target"],
-        "build": lambda name, p: {
-            "name": name, "interval": 1, "enabled": True, "embed": True,
-            "fallback": "已到点",
-            "source": {"type": "clock", "mode": "countdown",
-                       "target": str(p.get("target", "18:00"))}}},
-    "weather": {
-        "desc": "天气（wttr.in 接口，嵌入气泡）",
-        "params": [],
-        "build": lambda name, p: {
-            "name": name, "interval": 1800, "enabled": True, "embed": True,
-            "fallback": "天气获取失败",
-            "source": {"type": "http",
-                       "url": "https://wttr.in/?format=%c+%t", "timeout": 5}}},
-    "static": {
-        "desc": "固定文本（参数 text）",
-        "params": ["text"],
-        "build": lambda name, p: {
-            "name": name, "interval": 3600, "enabled": True, "embed": True,
-            "fallback": "",
-            "source": {"type": "static", "text": str(p.get("text", ""))}}},
-    "counter": {
-        "desc": "可点击计数器（＋1/清零，挂 counter 组件）",
-        "params": [],
-        "build": lambda name, p: {
-            "name": name, "interval": 3600, "enabled": True, "embed": True,
-            "fallback": "未启动",
-            "source": {"type": "script", "lang": "python", "ui": "counter",
-                       "code": "result = '计数器'", "timeout": 5}}},
-    "todo": {
-        "desc": "待办清单（挂 todo 组件）",
-        "params": [],
-        "build": lambda name, p: {
-            "name": name, "interval": 3600, "enabled": True, "embed": True,
-            "fallback": "未启动",
-            "source": {"type": "script", "lang": "python", "ui": "todo",
-                       "code": "result = '待办清单'", "timeout": 5}}},
-    "script": {
-        "desc": "自定义 Python 脚本（参数 code；state 字典可跨刷新记状态）",
-        "params": ["code"],
-        "build": lambda name, p: {
-            "name": name, "interval": 60, "enabled": True, "embed": True,
-            "fallback": "脚本出错",
-            "source": {"type": "script", "lang": "python",
-                       "code": str(p.get("code", "result = 'hello'")),
-                       "timeout": 15}}},
-    "stats": {
-        "desc": "统计表组件（参数 metric=todos/modules/buttons/chat/tool/token；"
-                "或用 http_url+http_path 接任意本地/网络 JSON 接口）",
-        "params": ["metric", "http_url", "http_path", "unit"],
-        "build": lambda name, p: {
-            "name": name, "interval": 60, "enabled": True, "embed": True,
-            "fallback": "",
-            "source": {"type": "script", "lang": "python", "ui": "stats",
-                       "code": "result = ''",
-                       "stats": {
-                           "metric": str(p.get("metric", "todos")),
-                           "http_url": str(p.get("http_url", "")),
-                           "http_path": str(p.get("http_path", "value")),
-                           "unit": str(p.get("unit", "")),
-                       }}}},
-    "llm": {
-        "desc": "大模型聊天（OpenAI 兼容接口；参数 base_url/model/api_key/system_prompt）",
-        "params": ["base_url", "model", "api_key", "system_prompt"],
-        "build": lambda name, p: {
-            "name": name, "interval": 60, "enabled": True, "embed": True,
-            "chat": True,
-            "fallback": "AI 不可用",
-            "greeting": "你好！我是大模型助手，想聊什么？",
-            "source": {"type": "llm",
-                       "base_url": str(p.get("base_url", "")),
-                       "model": str(p.get("model", "")),
-                       "api_key": str(p.get("api_key", "")),
-                       "system_prompt": str(p.get("system_prompt",
-                                                "你是桌宠助手，用简短中文回复")),
-                       "user_prompt": "你好",
-                       "temperature": 0.8,
-                       "max_tokens": 8192}},
-    },
-}
-
-
-def _widget_template(ui, desc, label, interval=3600):
-    """生成一个"挂自定义组件"的模板项：code 由模板写死，属安全模板。"""
-    return {
-        "desc": desc,
-        "params": [],
-        "build": (lambda name, p, _ui=ui, _lb=label, _iv=interval: {
-            "name": name, "interval": _iv, "enabled": True, "embed": True,
-            "fallback": "未启动",
-            "source": {"type": "script", "lang": "python", "ui": _ui,
-                       "code": "result = %r" % _lb, "timeout": 5}}),
-    }
-
-
-# ---- 组件类模板（挂 widgets/ 下已有的交互组件；code 固定，安全） ----
-MODULE_TEMPLATES.update({
-    "notes": _widget_template("notes", "便签：在气泡里随手记几行字", "便签"),
-    "calc": _widget_template("calc", "计算器：气泡内快速算数", "计算器"),
-    "tomato": _widget_template("tomato", "番茄钟：专注计时 + 休息提醒", "番茄钟"),
-    "health": _widget_template("health", "久坐提醒：定时提醒起身活动", "久坐提醒"),
-    "launcher": _widget_template("launcher", "快捷启动：气泡里点按钮开程序/网页", "快捷启动"),
-    "tokenmeter": _widget_template("tokenmeter", "Token 用量：统计大模型消耗", "Token用量", 300),
-    "canvas": _widget_template("canvas", "无限画布：手绘/AI 作画", "无限画布"),
-    "perler": _widget_template("perler", "拼豆：像素画格子，可让 AI 画", "拼豆"),
-})
-
-# ---- 数据源类模板（http/clock/script，常用场景开箱即用） ----
-MODULE_TEMPLATES.update({
-    "hitokoto": {
-        "desc": "每日一言（随机句子，来自 hitokoto.cn）",
-        "params": [],
-        "build": lambda name, p: {
-            "name": name, "interval": 1800, "enabled": True, "embed": True,
-            "fallback": "—",
-            "source": {"type": "http",
-                       "url": "https://v1.hitokoto.cn/?encode=text",
-                       "plain_text": True, "timeout": 5}}},
-    "exchange": {
-        "desc": "汇率（参数 base 基准币种、quote 目标币种，如 USD→CNY）",
-        "params": ["base", "quote"],
-        "build": lambda name, p: {
-            "name": name, "interval": 3600, "enabled": True, "embed": True,
-            "fallback": "汇率获取失败",
-            "transform": "rates.%s" % str(p.get("quote", "CNY") or "CNY").upper(),
-            "source": {"type": "http",
-                       "url": "https://open.er-api.com/v6/latest/%s"
-                              % str(p.get("base", "USD") or "USD").upper(),
-                       "timeout": 8}}},
-    "anniversary": {
-        "desc": "纪念日/倒数日（参数 date=YYYY-MM-DD，显示已过或还剩多少天）",
-        "params": ["date"],
-        "build": lambda name, p: {
-            "name": name, "interval": 3600, "enabled": True, "embed": True,
-            "fallback": "日期无效",
-            "source": {"type": "clock", "mode": "days",
-                       "date": str(p.get("date", "2026-01-01"))}}},
-    "disk": {
-        "desc": "磁盘剩余空间（参数 drive，如 C:）",
-        "params": ["drive"],
-        "build": lambda name, p: {
-            "name": name, "interval": 600, "enabled": True, "embed": True,
-            "fallback": "读取失败",
-            "source": {"type": "disk",
-                       "drive": str(p.get("drive", "C:") or "C:")}}},
-    "json_api": {
-        "desc": "任意 JSON 接口取字段（参数 url、path 如 data.items.0.title）",
-        "params": ["url", "path"],
-        "build": lambda name, p: {
-            "name": name, "interval": 300, "enabled": True, "embed": True,
-            "fallback": "获取失败",
-            "transform": str(p.get("path", "") or ""),
-            "source": {"type": "http", "url": str(p.get("url", "")),
-                       "timeout": 8}}},
-})
+# 唯一一份目录在 module_templates.py（编辑窗口也用它）；这里是给 AI 工具的视图，
+# 模板名 / 参数名和以前一致。
+MODULE_TEMPLATES = _mt.ai_templates()
 
 
 def _tool_list_templates(args):
@@ -2458,7 +2291,7 @@ class RuleProvider(StatusProvider):
             now = time.localtime()
             secs = (hh * 3600 + mm * 60) - (now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
             if secs <= 0:
-                return "已到点"
+                return str(st.get("done_text") or "已到点")
             return "还剩 %02d:%02d:%02d" % (secs // 3600, (secs % 3600) // 60, secs % 60)
         if mode == "days":
             from datetime import date as _date
@@ -2633,6 +2466,10 @@ class RuleProvider(StatusProvider):
 
     def _transform(self, raw):
         tr = self.rule.get("transform") or {}
+        if isinstance(tr, str):
+            # 旧版「汇率 / JSON 接口」模板把字段路径直接存成字符串，以前这里一 .get
+            # 就抛异常、永远显示"获取失败"。按 jsonpath 理解。
+            tr = {"type": "jsonpath", "path": tr}
         t = tr.get("type", "text")
         if t == "jsonpath":
             try:

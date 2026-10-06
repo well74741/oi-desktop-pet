@@ -1,4 +1,4 @@
-# oi桌宠 v0.9.40 · 项目交接文档（HANDOFF）
+# oi桌宠 v0.9.41 · 项目交接文档（HANDOFF）
 
 > 给新接手的智能体/开发者的第一份必读材料。先读本文 + `自定义模块开发指南.md`，再动手。
 >
@@ -81,8 +81,10 @@
 | 文件 | 职责 |
 |---|---|
 | `main.py` | 入口、托盘、单实例锁、依赖检查、退出清理（杀 WebEngine 子进程/取消提醒/清临时图片） |
-| `pet_gravity.py` | **核心**：桌宠窗口、径向菜单、设置窗口、RuleDialog、插槽系统、默认图标、右键多格式添加/编辑；配置原子读写（`save_settings`/`load_settings`/`_SETTINGS_LOCK`） |
+| `pet_gravity.py` | **核心**：桌宠窗口、径向菜单、设置窗口、插槽系统、默认图标、右键多格式添加/编辑；配置原子读写（`save_settings`/`load_settings`/`_SETTINGS_LOCK`） |
 | `status_monitor.py` | 模块提供器：http/llm/agent/clock/script/file/static、`RuleProvider`、`PetAPI`、LLM 工具（`TOOL_DEFS`）、提醒定时器注册表 |
+| `module_templates.py` | **模块模板库（唯一一份）**：分组、参数、build / match / write；编辑窗口和 AI 工具（`status_monitor.MODULE_TEMPLATES`）共用，不依赖 Qt |
+| `module_editor.py` | 添加 / 编辑模块窗口 `ModuleEditor`（v0.9.41 起取代 RuleDialog + TemplateGalleryDialog） |
 | `module_core.py` | **模块契约层**：版本号、规则归一化、`ModuleSpec`/`ModuleView`、后台刷新调度和失败退避 |
 | `data_store.py` | 通用 JSON 数据层：带锁 + 原子写（todo/counter/chat_history 等用户数据） |
 | `bubble_ui.py` | 气泡窗口、聊天面板、模块行渲染、链接点击、`_widget_height` 高度自适应 |
@@ -167,6 +169,48 @@
 - Codex 接入：状态显示已可用；桌面端审批无公开本地接口（详见"已知限制"）
 
 ## 7. 最近改动历史（重要，交代来龙去脉）
+
+- 【v0.9.41：模块添加 / 编辑窗口推翻重做 + 热键每次呼出都有展开动画 2026-10-06】
+  - **为什么重做**：旧的 RuleDialog 是早期设计 —— 预设下拉 + 类型下拉 + 整块 JSON +
+    「对话模式」勾选（很少用到）；添加又先走另一个 TemplateGalleryDialog。三份模板清单
+    （RuleDialog._presets 28 个 / GALLERY 24 个 / MODULE_TEMPLATES 22 个）互不一致。
+    用户看过草图（`backups/模块编辑窗口_草图.png`）后同意，要求「AI 分类排最上」「少留白」。
+  - **`module_templates.py`：唯一一份模板目录**。每个模板 = 分组 / 标题 / 说明 / base
+    规则 / 参数（带规则里的路径、校验）/ sig（认出已有规则）/ read / write。
+    `status_monitor.MODULE_TEMPLATES = _mt.ai_templates()`，原 22 个模板名和参数名不变，
+    新增 `ai`（AI 助手，共用 AI 设置、带完整工具清单）、`ai_line`（AI 每日一句，取代
+    「对话模式」不勾的用法）、`webchat`。`_SAFE_SCRIPT_TEMPLATES` 改为推导：脚本类且
+    code 不是参数的模板（结果 = 原集合 + webchat）；「自定义脚本」仍受闸门管（有测试）。
+    内置 AI 助手的人设 / 工具清单 / 开场白也引用这里（逐字节和原来一致，测过）。
+  - **`module_editor.py`：ModuleEditor**。添加：左侧分组列表（AI / 常用 / 时间 / 信息 /
+    工具 / 创作 / 高级），右侧只显示该模板的参数 + 名称 +（需要时）刷新间隔 +「显示在
+    气泡里 / 定时弹出」分段按钮；下方**实时预览**（本地类直接算，网络类防抖 0.5 秒后台
+    取；脚本和大模型要点「试一下」才跑，免得每敲一个字执行一次代码 / 花一次 token；
+    组件和对话类不显示预览）。编辑：按内容自动认出模板、不显示列表，窗口更窄、高度贴
+    内容。认不出的（正则 / 模板式 transform 等）按「自定义」直接展开 JSON；内置的 CPU /
+    内存 / 情绪等认成「内置模块」，只给名称 / 刷新 / 显示方式，不把内部脚本摊给用户。
+  - **编辑 = 在原规则副本上只改表单管的字段**。旧窗口只保留 source/transform/fallback，
+    编辑 AI 助手会把**开场白（greeting）弄丢**；max_chars、headers 也会丢。现在其余字段
+    原样保留；打开再保存不改坏（内置 12 个 + 旧预设 28 个全部验证，interval 缺省、
+    popup_duration 缺省、统计单位前导空格都不会被"顺手"改掉）。
+  - 「高级」里是原始 JSON：表单改动实时同步过去；手动改 JSON 后以 JSON 为准、表单锁住，
+    可「撤销 JSON 修改」。保存前校验：必填 / 格式（HH:MM、真实日期、http 地址）、JSON
+    语法、source.type、重名（含内置）。
+  - **顺手修掉的旧 bug**（实测确认后才改）：
+    ① 汇率 / JSON 接口模板把字段路径存成字符串 `"rates.CNY"`，`_transform` 对它 `.get`
+    直接抛异常 → **永远显示"汇率获取失败"**。模板改存 `{"type":"jsonpath",...}`，
+    `_transform` 也兼容字符串（用户以前建的那些自动恢复）。
+    ② AI 工具的天气模板没带 `plain_text`，wttr.in 按浏览器 UA 回整张网页。
+    ③ 画廊建的「AI 助手」没有 tools，不能操作桌宠（和内置的不一样）。
+  - 倒计时新增 `source.done_text`（到点后显示的文字，默认仍是"已到点"）。
+  - 删掉 RuleDialog / TemplateGalleryDialog / _JsonPlaceholderHighlighter（pet_gravity
+    少 950 多行）。旧预设里公网 IP / 上证 / 头条 / 程序检测等示例不再内置，需要的话用
+    「网页接口」「自定义脚本」「自定义（JSON）」建；用户已有的这类模块照常能编辑。
+  - **热键每次呼出都播展开动画**（用户反馈"第一遍之后都是静态的"）：v0.9.40 为了"再按
+    不收起"，菜单已展开时只把它挪到鼠标处 → 没有动画。现在已完全展开时 `show_menu` 在新
+    位置重播；正在展开时连按不从头来；收起途中按反转成展开。真实 RadialMenu 离屏验过
+    （含旧逻辑的负对照），test_hotkey 加了对应用例。
+  - 测试：新增 `test_module_editor.py`（56 项），共 14 个套件，3.14 / 3.12 都全过。
 
 - 【v0.9.40：快捷启动三件套做完 —— 全局热键合入 + .lnk 解析提速 + 已运行则切换 2026-10-05】
   - 这是 v0.9.39（在线更新）之后的第一个版本，**也是第一次真正走"自动更新"链路的
