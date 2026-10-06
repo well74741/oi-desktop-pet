@@ -5188,12 +5188,12 @@ class SettingsDialog(_DarkDialog):
             _b.clicked.connect(_fn)
             hdr_row.addWidget(_b)
         info_layout.addLayout(hdr_row)
-        # 两个入口：内置模块 / 自定义模块（点击切换下方列表）
+        # 两个入口：内置模块 / 已添加模块（点击切换下方列表）
         self._rules_tab = "builtin"
         tab_row = QHBoxLayout()
         tab_row.setSpacing(4)
         self._tab_builtin = QPushButton("内置模块")
-        self._tab_custom = QPushButton("自定义模块")
+        self._tab_custom = QPushButton("已添加模块")
         for _b in (self._tab_builtin, self._tab_custom):
             _b.setCheckable(True)
             _b.setCursor(Qt.PointingHandCursor)
@@ -5222,6 +5222,7 @@ class SettingsDialog(_DarkDialog):
         info_layout.addLayout(tab_row)
         self.status_rules_list = _RuleListWidget(self._reorder_status_rule)
         self.status_rules_list._on_delete = self._del_status_rule   # Delete 键删除
+        self.status_rules_list.currentRowChanged.connect(self._on_rule_row_changed)
         self.status_rules_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
         info_layout.addWidget(self.status_rules_list, 3)   # 列表占 3/4，测试框占低 1/4
         rbtn_row = QHBoxLayout()
@@ -5673,6 +5674,13 @@ class SettingsDialog(_DarkDialog):
         self._refresh_rules_list()
 
     def _refresh_rules_list(self):
+        self._rules_refreshing = True       # 重建列表时选中项会变，别当成用户点了别的模块
+        try:
+            self._refresh_rules_list_impl()
+        finally:
+            self._rules_refreshing = False
+
+    def _refresh_rules_list_impl(self):
         self.status_rules_list.clear()
         self._refresh_view_order()
         self._view_indices = list(self._view_order.get(self._rules_tab, []))
@@ -5729,10 +5737,7 @@ class SettingsDialog(_DarkDialog):
             pass
 
     def _add_status_rule(self):
-        def done(r):
-            self.temp_status_rules.append(r)
-            self._refresh_rules_list()
-        self._open_rule_dialog(None, done)
+        self._open_rule_dialog(None, self._rule_saved)
 
     def _open_ai_settings(self):
         """打开统一 AI 大模型配置（写入 settings['ai_profile']，立即持久化）。"""
@@ -5742,24 +5747,73 @@ class SettingsDialog(_DarkDialog):
     def _edit_status_rule(self):
         idx = self._current_rule_index()
         if 0 <= idx < len(self.temp_status_rules):
-            def done(r):
-                self.temp_status_rules[idx] = r
-                self._refresh_rules_list()
-            self._open_rule_dialog(self.temp_status_rules[idx], done)
+            self._open_rule_dialog(self.temp_status_rules[idx], self._rule_saved)
 
-    def _open_rule_dialog(self, rule, on_done):
+    def _rule_saved(self, r):
+        """编辑窗口点了保存 / 添加：按 id 放回列表（编辑期间列表可能被排序、删过，
+        不能用打开时的下标）；找不到就是新加的，追加。"""
+        for i, o in enumerate(self.temp_status_rules):
+            if str(o.get("id")) == str(r.get("id")):
+                self.temp_status_rules[i] = r
+                break
+        else:
+            self.temp_status_rules.append(r)
+        self._refresh_rules_list()
+        self._select_rule_id(r.get("id"))
+
+    def _select_rule_id(self, rid):
+        """程序选中某一行（不触发「切换编辑窗口」）。"""
+        self._rules_refreshing = True
+        try:
+            for row, idx in enumerate(self._view_indices):
+                if str(self.temp_status_rules[idx].get("id")) == str(rid):
+                    self.status_rules_list.setCurrentRow(row)
+                    break
+        finally:
+            self._rules_refreshing = False
+
+    def _on_rule_row_changed(self, _row):
+        """编辑窗口开着时点了别的模块：编辑窗口立刻切过去。
+        放到下一轮事件循环再做 —— 可能要弹「要先保存吗」，别在点击过程中弹。"""
+        if getattr(self, "_rules_refreshing", False):
+            return
+        from module_editor import live_editor
+        dlg = live_editor(_RULE_DIALOG_REF[0])
+        idx = self._current_rule_index()
+        if dlg is None or not (0 <= idx < len(self.temp_status_rules)):
+            return
+        rid = self.temp_status_rules[idx].get("id")
+        if str(rid) != str(dlg.rule_id()):
+            QTimer.singleShot(0, lambda: self._switch_editor_to(rid))
+
+    def _switch_editor_to(self, rid):
+        from module_editor import live_editor, release
+        dlg = live_editor(_RULE_DIALOG_REF[0])
+        rule = next((r for r in self.temp_status_rules
+                     if str(r.get("id")) == str(rid)), None)
+        if dlg is None or rule is None or str(rid) == str(dlg.rule_id()):
+            return
+        back = dlg.rule_id()
+        pos = dlg.pos()
+        if not release(dlg):
+            if back is not None:
+                self._select_rule_id(back)      # 取消了：列表选中项回到正在编辑的那个
+            return
+        self._select_rule_id(rid)                # 保存会重建列表，把选中项放回点的那一行
+        self._open_rule_dialog(rule, self._rule_saved, pos=pos)
+
+    def _open_rule_dialog(self, rule, on_done, pos=None):
         """非模态打开模块添加 / 编辑窗口（rule=None 为添加）：同一时间只开一个，
-        已存在则前置；关闭后回调结果。"""
-        ref = _RULE_DIALOG_REF[0]
-        old = ref() if ref else None
-        if old is not None and isinstance(old, QWidget) and not old.isHidden():
+        已存在则前置；关闭后回调结果。pos：切换模块时沿用旧窗口的位置。"""
+        from module_editor import ModuleEditor, live_editor
+        old = live_editor(_RULE_DIALOG_REF[0])
+        if old is not None:
             try:
                 old.raise_()
                 old.activateWindow()
             except Exception:
                 pass
             return
-        from module_editor import ModuleEditor
         dlg = ModuleEditor(self, rule, settings=self.settings,
                            others=self.temp_status_rules)
         dlg.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -5772,6 +5826,8 @@ class SettingsDialog(_DarkDialog):
             except Exception:
                 pass
         dlg.finished.connect(_fin)
+        if pos is not None:
+            dlg.move(pos)
         dlg.show()
 
     def _del_status_rule(self):
@@ -5864,7 +5920,7 @@ class SettingsDialog(_DarkDialog):
             self._switch_rules_tab("custom")
             _kit.info(
                 self, "导入完成",
-                ("成功导入 %d 个模块（已加入自定义模块）" % added) if added
+                ("成功导入 %d 个模块（已加入「已添加模块」）" % added) if added
                 else "没有新增模块（导入的文件中都已存在）")
         except Exception as e:
             _kit.warn(self, "导入失败", str(e))
@@ -5901,8 +5957,7 @@ class SettingsDialog(_DarkDialog):
             if ui == "pomodoro":
                 from h5_cards import PomodoroCard
                 card = PomodoroCard(state=rp.state)
-                card.setFixedWidth(184)
-                self.rules_result_view.show_widget(card)
+                self.rules_result_view.show_widget(card)   # 宽度按气泡里的算
                 return
             from widgets import load_module_widget
             w, werr = load_module_widget(ui, self.rules_result_view)
@@ -6884,6 +6939,18 @@ class GravityPet(QWidget):
             rid = (rule or {}).get("id")
             if not rid:
                 return
+            # 已经开着一个编辑窗口：同一个就提到前面；别的模块就切过去（有改动先问）
+            from module_editor import live_editor, release
+            cur = live_editor(_RULE_DIALOG_REF[0])
+            pos = None
+            if cur is not None:
+                if str(cur.rule_id()) == str(rid):
+                    cur.raise_()
+                    cur.activateWindow()
+                    return
+                pos = cur.pos()
+                if not release(cur):
+                    return
 
             def _fin(result):
                 try:
@@ -6916,6 +6983,8 @@ class GravityPet(QWidget):
             dlg.setAttribute(Qt.WA_DeleteOnClose, True)
             _RULE_DIALOG_REF[0] = weakref.ref(dlg)
             dlg.finished.connect(_fin)
+            if pos is not None:
+                dlg.move(pos)
             dlg.show()
             dlg.raise_()
             dlg.activateWindow()

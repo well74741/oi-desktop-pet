@@ -28,7 +28,7 @@ from PyQt5.QtCore import Qt, QObject, QTimer, QRectF, pyqtSignal
 from PyQt5.QtGui import QPixmap, QPainter, QColor, QPen, QFont
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QTextBrowser, QListWidget, QListWidgetItem, QFrame, QSizePolicy,
+    QTextBrowser, QListWidget, QListWidgetItem, QFrame,
 )
 
 
@@ -482,7 +482,11 @@ class CardHost(QScrollArea):
     def show_cards(self, cards):
         """替换显示一组卡片（清空旧的）。"""
         for w in list(self._cards):
+            # 当场藏起来、摘下来：只 deleteLater 的话旧组件要等事件循环空下来才真删，
+            # 这之前还挂在测试区里照样画 —— 连测几个模块就是几层叠在一起
             self._lay.removeWidget(w)
+            w.hide()
+            w.setParent(None)
             w.deleteLater()
         self._cards = []
         for card in cards:
@@ -597,6 +601,7 @@ class ResultView(QWidget):
         p.end()
 
     def show_result(self, val, error=""):
+        self.host.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         cards = result_cards(val, error)
         self.host.show_cards(cards)
         self.placeholder.setVisible(not cards)
@@ -622,28 +627,37 @@ class ResultView(QWidget):
                 pass
 
     def show_widget(self, widget):
-        """直接显示一个交互组件（与气泡内渲染一致），如番茄卡片。"""
+        """直接显示一个交互组件，尺寸和气泡里完全一样（宽 = 气泡里组件的宽度，
+        高 = 组件自己要的高度）。测试区放不下就出滚动条，不再硬压。
+
+        以前统一压成 184 宽、关掉横向滚动条：组件按气泡宽度（标准档 275）排的
+        工具栏被挤得按钮叠在一起、右半截直接看不见（拼豆 / 画布最明显）。
+        """
         self.placeholder.hide()
         self.host.show_cards([])
+        self.host.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.host.add_widget(widget)
         try:
-            # 与气泡卡片内容一致：固定宽度 + 忽略固有尺寸策略 + 居中
-            k = self._k
-            if widget.width() < _kv(100, k) or widget.width() > _kv(300, k):
-                widget.setFixedWidth(_kv(184, k))
-            widget.setSizePolicy(QSizePolicy.Ignored, widget.sizePolicy().verticalPolicy())
-            host_h = self.host.viewport().height() if self.host.viewport() else self.height()
-            if widget.height() <= max(10, host_h - 4):
-                # 组件能完整放下时垂直居中
-                self.host._lay.setAlignment(widget, Qt.AlignHCenter | Qt.AlignVCenter)
-            else:
-                # 组件高于测试框：顶对齐，避免内容上移裁切、按钮顶到框边
-                self.host._lay.setAlignment(widget, Qt.AlignHCenter | Qt.AlignTop)
+            from widgets import kit
+            widget.setFixedWidth(kit.bubble_widget_width())
+            self._fit_widget(widget)
+            if hasattr(widget, "current_height"):
+                # 组件自己改高度（画布 / 拼豆 / 统计的「展开」）时跟着变
+                widget.on_resize = lambda w=widget: self._fit_widget(w)
+            self.host._lay.setAlignment(widget, Qt.AlignHCenter | Qt.AlignTop)
         except Exception:
             pass
         widget.show()
 
+    def _fit_widget(self, widget):
+        try:
+            from bubble_ui import _widget_height
+            widget.setFixedHeight(_widget_height(widget, widget.width()))
+        except Exception:
+            pass
+
     def clear(self):
+        self.host.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.host.show_cards([])
         self.placeholder.show()
         if self._pin_size is None:

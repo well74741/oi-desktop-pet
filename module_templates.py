@@ -59,6 +59,32 @@ def interval_text(sec):
     return "每 %d 秒" % sec
 
 
+_UNITS = (("秒", 1), ("s", 1), ("分钟", 60), ("分", 60), ("min", 60), ("m", 60),
+          ("小时", 3600), ("时", 3600), ("h", 3600), ("天", 86400), ("d", 86400))
+MAX_INTERVAL = 7 * 86400
+
+
+def parse_interval(text):
+    """「刷新 / 弹出间隔」框里手填的文字 → 秒；看不懂返回 None。
+    认：90、90秒、45 s、5分钟、1.5 小时、2天，以及下拉里的「每 30 分钟」「每小时」。"""
+    t = str(text or "").strip().lower().replace(" ", "")
+    if t.startswith("每"):
+        t = t[1:]
+    if not t:
+        return None
+    num, unit = t, 1
+    for name, sec in _UNITS:
+        if t.endswith(name):
+            num, unit = t[:-len(name)], sec
+            break
+    try:
+        n = float(num) if num else 1.0
+    except ValueError:
+        return None
+    v = int(round(n * unit))
+    return v if 1 <= v <= MAX_INTERVAL else None
+
+
 # ---------------------------------------------------------------- 路径读写
 def _get(rule, path):
     cur = rule

@@ -10,7 +10,7 @@ import threading
 import webbrowser
 
 from PyQt5.QtCore import QObject, QTimer, Qt, pyqtSignal
-from PyQt5.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QTextBrowser,
+from PyQt5.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QPushButton, QTextBrowser,
                              QVBoxLayout)
 
 import updater as U
@@ -43,6 +43,11 @@ class UpdateDialog(kit.DarkDialog):
 
     def __init__(self, parent=None, pet=None, info=None):
         super().__init__("检查更新", parent)
+        try:
+            import pet_gravity
+            pet_gravity._apply_dark_style(self)   # 按钮和设置窗一致
+        except Exception:
+            pass
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         self._pet = pet
         self._info = info
@@ -55,8 +60,10 @@ class UpdateDialog(kit.DarkDialog):
         self._b.launched.connect(self._on_launched)
 
         lay = QVBoxLayout(self.body)
-        lay.setContentsMargins(kit.ui(14), kit.ui(12), kit.ui(14), kit.ui(12))
-        lay.setSpacing(kit.ui(8))
+        # 这里写的都是逻辑尺寸：窗口显示时界面缩放（kit.install_ui_zoom）会统一放大。
+        # 以前每个数又先乘了一遍 kit.ui()，等于放大两次 —— 380 宽的窗口实际 855。
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(6)
         self.status = QLabel("")
         self.status.setWordWrap(True)
         self.status.setStyleSheet(
@@ -64,13 +71,18 @@ class UpdateDialog(kit.DarkDialog):
         lay.addWidget(self.status)
         self.notes = QTextBrowser()
         self.notes.setOpenExternalLinks(True)
-        self.notes.setMaximumHeight(kit.ui(170))
+        self.notes.setMaximumHeight(170)
         self.notes.setStyleSheet(
             "QTextBrowser{background:#161b25;color:#c7d0e0;border:1px solid #39414f;"
             "border-radius:6px;padding:4px;font-size:11px;font-family:%s;}" % kit._FONT)
         self.notes.hide()
         lay.addWidget(self.notes)
         self.bar = kit.progress(0, 100, height=8)
+        self.bar.setFixedHeight(6)        # kit.progress 按气泡档位算的，这里是窗口
+        self.bar.setStyleSheet(
+            "QProgressBar{background:rgba(255,255,255,25);border:none;border-radius:3px;}"
+            "QProgressBar::chunk{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #4a90e2,stop:1 #2fb8c0);border-radius:3px;}")
         self.bar.hide()
         lay.addWidget(self.bar)
         self.detail = QLabel("")
@@ -80,7 +92,7 @@ class UpdateDialog(kit.DarkDialog):
         lay.addWidget(self.detail)
 
         row = QHBoxLayout()
-        row.setSpacing(kit.ui(6))
+        row.setSpacing(6)
         self.auto_cb = QCheckBox("自动检查更新")
         self.auto_cb.setToolTip("启动后和每隔 6 小时自动检查一次，有新版本才提醒")
         self.auto_cb.setStyleSheet(
@@ -92,12 +104,16 @@ class UpdateDialog(kit.DarkDialog):
         self._btns = []
         self._btn_row = row
         lay.addLayout(row)
-        self.setFixedWidth(kit.ui(380))
+        self.setFixedWidth(340)
 
         if info is None:
             self.check()
         else:
             self._show_available(info)
+
+    def _z(self, v):
+        """显示之后才设的尺寸：界面缩放已经做过，要自己换算。"""
+        return kit.ui_i(v) if self.property("oiZ") else v
 
     # ---------- 设置读写 ----------
     def _settings(self):
@@ -136,7 +152,12 @@ class UpdateDialog(kit.DarkDialog):
             b.deleteLater()
         self._btns = []
         for text, slot, primary in specs:
-            b = kit.btn(text, primary=primary)
+            # 和设置窗同一套按钮（kit.btn 是气泡里的按钮，按气泡档位算尺寸，
+            # 放进窗口再被界面缩放放大一次，字比别处大一圈）
+            b = QPushButton(text)
+            if primary:
+                b.setObjectName("primary")
+            b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(slot)
             self._btn_row.addWidget(b)
             self._btns.append(b)
@@ -222,13 +243,15 @@ class UpdateDialog(kit.DarkDialog):
                 fmt = QTextCharFormat()
                 # 用像素字号和正文（11px）对齐，只大 1px + 加粗，够区分就行
                 fmt.setProperty(QTextFormat.FontPixelSize, 12)
+                # Markdown 标题还带着「字号档位 +N」，不清掉的话上面的像素字号会再被放大一倍
+                fmt.setProperty(QTextFormat.FontSizeAdjustment, 0)
                 fmt.setFontWeight(QFont.Bold)
                 cur.mergeCharFormat(fmt)
             b = b.next()
         self.notes.show()
-        doc.setTextWidth(max(1, self.notes.viewport().width() or kit.ui(340)))
-        h = int(doc.size().height()) + kit.ui(14)
-        self.notes.setFixedHeight(max(kit.ui(48), min(kit.ui(170), h)))
+        doc.setTextWidth(max(1, self.notes.viewport().width() or self._z(310)))
+        h = int(doc.size().height()) + self._z(14)
+        self.notes.setFixedHeight(max(self._z(48), min(self._z(170), h)))
 
     def _skip(self):
         if self._info:

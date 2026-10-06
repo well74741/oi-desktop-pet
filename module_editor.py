@@ -18,10 +18,10 @@ import os
 import threading
 import time
 
-from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont
-from PyQt5.QtWidgets import (QButtonGroup, QComboBox, QFormLayout, QFrame, QHBoxLayout,
-                             QLabel, QLineEdit, QListWidget, QListWidgetItem,
+from PyQt5.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFormLayout, QFrame,
+                             QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                              QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 import module_templates as mt
@@ -91,6 +91,7 @@ class ModuleEditor(_kit.DarkDialog):
         self._auto_name = add       # 名称还没被用户改过 → 换模板时跟着换
         self._json_dirty = False
         self._syncing = False
+        self._baseline = None
         self._seq = 0
         self._bridge = _Bridge(self)
         self._bridge.done.connect(self._on_preview_done)
@@ -149,9 +150,13 @@ class ModuleEditor(_kit.DarkDialog):
         v.addStretch(1)
         btns = QHBoxLayout()
         btns.addStretch(1)
-        cancel = _kit.btn("取消", fixed_w=72)
+        # 和设置窗同一套按钮（kit.btn 是气泡里的按钮，按气泡档位算，放进窗口会
+        # 再被界面缩放放大一次，字比别处大一圈）
+        cancel = QPushButton("取消")
+        cancel.setAutoDefault(False)
         cancel.clicked.connect(self.reject)
-        self.ok_btn = _kit.btn("添加" if add else "保存", primary=True, fixed_w=72)
+        self.ok_btn = QPushButton("添加" if add else "保存")
+        self.ok_btn.setObjectName("primary")
         self.ok_btn.setDefault(True)
         self.ok_btn.clicked.connect(self._accept)
         btns.addWidget(cancel)
@@ -281,13 +286,18 @@ class ModuleEditor(_kit.DarkDialog):
         cur_iv = int((orig.get("interval", 60) if self._orig is not None
                       else t.base.get("interval", 60)) or 60)
         self._iv_initial = cur_iv
+        # 可以下拉选常用档位，也可以直接手填（如 45 秒、2 分钟、1.5 小时）
         self.iv_combo = QComboBox()
+        self.iv_combo.setEditable(True)
+        self.iv_combo.setInsertPolicy(QComboBox.NoInsert)
         for sec, txt in mt.INTERVALS:
             self.iv_combo.addItem(txt, sec)
         if self.iv_combo.findData(cur_iv) < 0:
             self.iv_combo.addItem(mt.interval_text(cur_iv), cur_iv)
         self.iv_combo.setCurrentIndex(self.iv_combo.findData(cur_iv))
-        self.iv_combo.currentIndexChanged.connect(self._changed)
+        self.iv_combo.lineEdit().setPlaceholderText("如 45 秒、2 分钟")
+        self.iv_combo.setToolTip("可以直接手填：90、45 秒、5 分钟、1.5 小时、1 天")
+        self.iv_combo.editTextChanged.connect(self._changed)
         self.iv_label = _lab("刷新")
         f.addRow(self.iv_label, self.iv_combo)
 
@@ -380,6 +390,7 @@ class ModuleEditor(_kit.DarkDialog):
             self._tick.stop()
         if t.preview == "auto":
             self._run_preview()
+        self._baseline = self.compose(strict=False)[0]
         self._fit()
 
     # ------------------------------------------------------------ 规则组装
@@ -402,7 +413,7 @@ class ModuleEditor(_kit.DarkDialog):
         t = self._tpl
         rule = copy.deepcopy(self._orig) if self._orig is not None else t.build("")
         t.write(rule, self._values())
-        iv = int(self.iv_combo.currentData())
+        iv = self._iv_value() or self._iv_initial
         # 只在新建、原来就有、或用户改过时才写 —— 打开再保存不凭空多字段
         if (t.refresh or self._popup_on()) and (
                 self._orig is None or "interval" in rule or iv != self._iv_initial):
@@ -417,6 +428,21 @@ class ModuleEditor(_kit.DarkDialog):
         for k in mt.HIDDEN_KEYS:
             rule.pop(k, None)
         return rule
+
+    def _iv_value(self):
+        return mt.parse_interval(self.iv_combo.currentText())
+
+    def is_dirty(self):
+        """和刚打开（或刚换模板）时比有没有改过。切到别的模块前用来决定要不要问。"""
+        if self._tpl is None:
+            return False
+        if (self._tpl.refresh or self._popup_on()) and self._iv_value() is None:
+            return True
+        rule, err = self.compose(strict=False)
+        return bool(err) or rule != self._baseline
+
+    def rule_id(self):
+        return None if self._orig is None else self._rid
 
     def _json_text(self, rule):
         body = {k: v for k, v in (rule or {}).items() if k not in mt.HIDDEN_KEYS}
@@ -444,6 +470,8 @@ class ModuleEditor(_kit.DarkDialog):
                         err = p.error(str(vals.get(p.key, "")).strip())
                         if err:
                             return None, "%s：%s" % (p.label, err)
+            if strict and (self._tpl.refresh or self._popup_on())                     and self._iv_value() is None:
+                return None, "%s看不懂：写成 45 秒、5 分钟、1.5 小时这样" % self.iv_label.text()
             body = self._form_rule()
         rule = {"id": self._rid, "name": name}
         rule.update({k: v for k, v in body.items() if k not in mt.HIDDEN_KEYS})
@@ -633,6 +661,12 @@ class ModuleEditor(_kit.DarkDialog):
         lay = self.layout()
         if lay is None:
             return
+        # 控件刚 hide / show 时，父控件缓存的尺寸要等排队的 LayoutRequest 处理后
+        # 才更新；直接取 sizeHint 拿到的还是展开时的高度 —— 收起「高级」后窗口
+        # 留一大片空白就是这么来的
+        # 每层父控件都排着一个 LayoutRequest，逐层处理掉（嵌套几层就要几轮）
+        for _ in range(4):
+            QApplication.sendPostedEvents(None, QEvent.LayoutRequest)
         lay.activate()
         w = lay.totalSizeHint().width()
         h = lay.totalHeightForWidth(w) if lay.hasHeightForWidth() \
@@ -653,3 +687,61 @@ class ModuleEditor(_kit.DarkDialog):
         self._pv_timer.stop()
         self._seq += 1               # 后台还没回来的预览结果一律作废
         super().done(r)
+
+
+def ask_save(parent, name):
+    """编辑窗口里有没保存的修改、又要切到别的模块时问一句。
+    返回 "save" / "discard" / "cancel"。"""
+    d = _kit.DarkDialog("切换模块", parent)
+    import pet_gravity as G
+    G._apply_dark_style(d)
+    v = QVBoxLayout(d.body)
+    v.setContentsMargins(14, 12, 14, 12)
+    v.setSpacing(10)
+    lb = QLabel("「%s」改了还没保存，要先保存吗？" % name)
+    lb.setWordWrap(True)
+    lb.setStyleSheet("color:#dfe6f2;font-size:12px;")
+    v.addWidget(lb)
+    row = QHBoxLayout()
+    row.addStretch(1)
+    out = ["cancel"]
+    for text, key, primary in (("取消", "cancel", False), ("不保存", "discard", False),
+                               ("保存", "save", True)):
+        b = QPushButton(text)
+        if primary:
+            b.setObjectName("primary")
+            b.setDefault(True)
+        else:
+            b.setAutoDefault(False)
+        b.clicked.connect(lambda _=False, k=key: (out.__setitem__(0, k), d.accept()))
+        row.addWidget(b)
+    v.addLayout(row)
+    d.setFixedWidth(300)
+    _kit.place_near(d, parent)
+    d.exec_()
+    return out[0]
+
+
+def live_editor(ref):
+    """取还开着的那个编辑窗口（_RULE_DIALOG_REF 里存的弱引用）；没有返回 None。"""
+    try:
+        d = ref() if ref else None
+        if d is not None and not d.isHidden():
+            return d
+    except RuntimeError:          # 底层已删
+        pass
+    return None
+
+
+def release(dlg):
+    """要在这个编辑窗口里换别的模块：有改动先问要不要保存。
+    返回 True = 窗口已关，可以开新的；False = 用户取消，或保存时没通过校验（窗口留着、显示原因）。"""
+    if dlg.is_dirty():
+        ans = ask_save(dlg, dlg.name_edit.text().strip() or "这个模块")
+        if ans == "cancel":
+            return False
+        if ans == "save":
+            dlg._accept()
+            return dlg.rule is not None
+    dlg.reject()
+    return True

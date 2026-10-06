@@ -37,6 +37,8 @@ from PyQt5.QtCore import Qt                          # noqa: E402
 from PyQt5.QtWidgets import QApplication, QDialog    # noqa: E402
 
 app = QApplication([])
+from widgets import kit                              # noqa: E402
+kit.install_ui_zoom(app)          # 和真程序一样开界面缩放：字号 / 尺寸放大两次的问题只在这时出现
 import module_editor as ME                           # noqa: E402
 import module_templates as mt                        # noqa: E402
 import status_monitor as sm                          # noqa: E402
@@ -323,10 +325,187 @@ try:
     app.processEvents()
     check("编辑后列表里那一项更新了", sd.temp_status_rules[idx]["name"] == "大钟")
     sd.close()
+
+    # ===== 十一、第二轮反馈 =====
+    print("\n--- 十一、按钮字号 / 窗口尺寸 ---")
+    from PyQt5.QtWidgets import QPushButton
+    import update_ui
+    import updater
+
+    def pump(n=5):
+        for _ in range(n):
+            app.processEvents()
+
+    sd = G.SettingsDialog(G.load_settings())
+    sd.show()
+    pump()
+    ref = next(b for b in sd.findChildren(QPushButton) if b.text() == "确定")
+    ref_px = ref.font().pixelSize()
+    check("模块列表第二栏改名为「已添加模块」", sd._tab_custom.text() == "已添加模块")
+    e = ME.ModuleEditor(None, None, ST)
+    e.show()
+    pump()
+    check("添加模块窗口的按钮和设置窗一样大（以前是气泡按钮，被放大两次）",
+          e.ok_btn.font().pixelSize() == ref_px,
+          "%d vs %d" % (e.ok_btn.font().pixelSize(), ref_px))
+    e.close()
+    _mode = updater.install_mode
+    updater.install_mode = lambda: "installed"
+    try:
+        u = update_ui.UpdateDialog(None, None, {
+            "version": "9.9.9", "tag": "v9.9.9", "title": "v9.9.9",
+            "notes": "- 改动一\n- 改动二", "asset": {"name": "setup.exe", "size": 1}})
+        u.show()
+        pump()
+        btns = [b for b in u.findChildren(QPushButton) if b.isVisible() and b.text()]
+        check("检查更新窗口不再巨大（以前 380 被放大两次，实际 855 宽）",
+              u.width() <= kit.ui(360), "宽 %d" % u.width())
+        check("检查更新窗口的按钮和设置窗一样大",
+              btns and all(b.font().pixelSize() == ref_px for b in btns),
+              str([(b.text(), b.font().pixelSize()) for b in btns]))
+        u.close()
+    finally:
+        updater.install_mode = _mode
+
+    d = ME.ModuleEditor(None, mt.BY_KEY["countdown"].build("下班", {}), ST)
+    d.show()
+    pump()
+    h0 = d.height()
+    d.adv_btn.setChecked(True)
+    h1 = d.height()
+    d.adv_btn.setChecked(False)
+    check("展开「高级」再收起，窗口缩回原来的高度（以前留一大片空白）",
+          h1 > h0 and d.height() == h0, "%d -> %d -> %d" % (h0, h1, d.height()))
+    d.close()
+
+    print("\n--- 十二、间隔可以手填 ---")
+    cases = {"90": 90, "45 秒": 45, "5分钟": 300, "1.5 小时": 5400, "2天": 172800,
+             "每 30 分钟": 1800, "每小时": 3600, "每秒": 1, "10s": 10, "abc": None, "0": None}
+    bad = {k: mt.parse_interval(k) for k, v in cases.items() if mt.parse_interval(k) != v}
+    check("间隔文字解析（90 / 45 秒 / 5分钟 / 1.5 小时 / 下拉档位 / 乱填）", not bad, str(bad))
+    d = ME.ModuleEditor(None, None, ST)
+    pick(d, "static")
+    d.pop_btn.setChecked(True)
+    check("间隔框可以直接打字", d.iv_combo.isEditable())
+    d.iv_combo.setEditText("45 秒")
+    out, err = d.compose()
+    check("弹出间隔手填 45 秒 -> 存成 45", not err and out["interval"] == 45, err)
+    d.iv_combo.setEditText("一会儿")
+    d._accept()
+    check("填了看不懂的 -> 不保存、给提示", d.rule is None and "看不懂" in d.hint.text(),
+          d.hint.text())
+
+    print("\n--- 十三、编辑窗口开着时点别的模块 ---")
+    sd._switch_rules_tab("builtin")
+    rows = [sd.temp_status_rules[i] for i in sd._view_indices]
+    sd.status_rules_list.setCurrentRow(0)
+    sd._edit_status_rule()
+    ed = ME.live_editor(G._RULE_DIALOG_REF[0])
+    check("先打开第 1 个模块", ed is not None and ed.rule_id() == rows[0]["id"])
+    sd.status_rules_list.setCurrentRow(1)
+    pump()
+    ed = ME.live_editor(G._RULE_DIALOG_REF[0])
+    check("没改动 -> 点第 2 个，编辑窗口直接切过去、不问",
+          ed is not None and ed.rule_id() == rows[1]["id"])
+    asked = []
+    _ask = ME.ask_save
+    try:
+        old_name = rows[1]["name"]
+        ed.name_edit.setText("改了名字A")
+        ME.ask_save = lambda parent, name: (asked.append(name), "cancel")[1]
+        sd.status_rules_list.setCurrentRow(2)
+        pump()
+        ed2 = ME.live_editor(G._RULE_DIALOG_REF[0])
+        check("有改动 -> 先问；选「取消」-> 留在原模块、改动还在、列表选中项退回",
+              asked and ed2 is ed and ed.name_edit.text() == "改了名字A"
+              and sd._current_rule_index() == sd._view_indices[1])
+        ME.ask_save = lambda parent, name: "discard"
+        sd.status_rules_list.setCurrentRow(2)
+        pump()
+        ed2 = ME.live_editor(G._RULE_DIALOG_REF[0])
+        check("选「不保存」-> 切到第 3 个，第 2 个原样",
+              ed2 is not None and ed2.rule_id() == rows[2]["id"]
+              and next(r for r in sd.temp_status_rules
+                       if r["id"] == rows[1]["id"])["name"] == old_name)
+        ed2.name_edit.setText("改了名字B")
+        ME.ask_save = lambda parent, name: "save"
+        sd.status_rules_list.setCurrentRow(3)
+        pump()
+        ed3 = ME.live_editor(G._RULE_DIALOG_REF[0])
+        check("选「保存」-> 改动存进列表，再切到第 4 个",
+              ed3 is not None and ed3.rule_id() == rows[3]["id"]
+              and next(r for r in sd.temp_status_rules
+                       if r["id"] == rows[2]["id"])["name"] == "改了名字B"
+              and sd._current_rule_index() == sd._view_indices[3])
+    finally:
+        ME.ask_save = _ask
+    ed = ME.live_editor(G._RULE_DIALOG_REF[0])
+    if ed is not None:
+        ed.close()
+
+    print("\n--- 十四、设置窗测试区 ---")
+    sd._on_rule_test_done("拼豆", "", "", sm.RuleProvider(mt.BY_KEY["perler"].build("拼豆")))
+    first = sd.rules_result_view.host._cards[0]
+    sd._on_rule_test_done("计数", "", "", sm.RuleProvider(mt.BY_KEY["counter"].build("计数")))
+    second = sd.rules_result_view.host._cards[0]
+    check("组件按气泡里的宽度摆（以前硬压成 184，工具栏按钮挤在一起）",
+          second.width() == kit.bubble_widget_width(),
+          "%d vs %d" % (second.width(), kit.bubble_widget_width()))
+    check("换测一个模块，上一个组件当场撤掉（以前叠在一起）",
+          first.isHidden() and first.parent() is None)
+    sd.rules_result_view.setFixedSize(kit.ui(150), kit.ui(60))
+    pump()
+    check("测试区比组件小 -> 出滚动条，不硬压",
+          sd.rules_result_view.host.horizontalScrollBar().maximum() > 0
+          and sd.rules_result_view.host.verticalScrollBar().maximum() > 0)
+    sd.close()
+    st = G.load_settings()
+    st["status_rules"] = [dict(mt.BY_KEY["counter"].build("计数"), id="t_counter")]
+    G.save_settings(st)
+    pet = G.GravityPet(G.load_settings())
+    pet.move(-3000, 300)
+    pet.show()
+    pet.status_bubble._do_show()
+    for _ in range(40):
+        pump(1)
+    from widgets import ModuleWidget
+    real = [w.width() for w in pet.status_bubble.findChildren(ModuleWidget) if w.isVisible()]
+    check("……这个宽度和真气泡里组件的宽度一致",
+          real and real[0] == kit.bubble_widget_width(),
+          "%s vs %d" % (real, kit.bubble_widget_width()))
+    pet.close()
+
+    print("\n--- 十五、弹出气泡的位置 ---")
+    scr = (0, 0, 1920, 1040)
+    sizes = [(165, 40), (130, 40)]
+    pet_top = 600
+    side = (245, 190, 560, 1000)            # 用户截图：放大后的气泡栏在桌宠右边，很高
+    got = sm.popup_slots(sizes, 160, pet_top, scr, side)
+    check("气泡栏在旁边 -> 弹出气泡就在桌宠头顶（以前被顶到气泡栏上缘 190 以上）",
+          all(y > 450 and y + h <= pet_top for (x, y), (w, h) in zip(got, sizes)), str(got))
+    check("  ……而且不压着气泡栏", all(x + w <= side[0] for (x, y), (w, h) in zip(got, sizes)))
+    above = (60, 150, 375, 590)             # 气泡栏正好在桌宠头顶
+    got = sm.popup_slots(sizes, 220, pet_top, scr, above)
+    check("气泡栏在头顶 -> 往旁边让开，高度仍贴着桌宠",
+          all((x + w <= above[0] or x >= above[2]) and y > 450
+              for (x, y), (w, h) in zip(got, sizes)), str(got))
+    wide = (0, 150, 1920, 590)              # 两边都没地方
+    got = sm.popup_slots(sizes, 220, pet_top, scr, wide)
+    check("两边都放不下 -> 才叠到气泡栏上方",
+          all(y + h <= wide[1] for (x, y), (w, h) in zip(got, sizes)), str(got))
+    got = sm.popup_slots(sizes, 220, pet_top, scr, None)
+    check("没有气泡栏 -> 叠在桌宠头顶、互不重叠",
+          got[0][1] + 40 <= pet_top and got[1][1] + 40 <= got[0][1], str(got))
 finally:
     shutil.rmtree(SAND, ignore_errors=True)
 
 print("\n通过 %d，失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:
     print("失败项：" + "、".join(FAIL))
-sys.exit(1 if FAIL else 0)
+
+# 这个套件会真建桌宠 / 气泡 / 设置窗和一堆 Qt 弹窗。跑完解释器正常退出时，Qt 拆这些
+# 窗口会段错误（退出码 139 / 3221225477；测试本身 79 项全过）。结果已经打印完了，
+# 直接退，不跑那套析构 —— 退出码才是真实结论。
+sys.stdout.flush()
+sys.stderr.flush()
+os._exit(1 if FAIL else 0)

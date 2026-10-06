@@ -135,6 +135,14 @@ def bubble_token(name):
         raise KeyError("unknown bubble token: %s" % name)
 
 
+def bubble_widget_width():
+    """交互组件在气泡里的实际宽度：气泡宽 - 两侧外边距 - 两侧拖动把手 - 卡片左右内边距。
+    和 bubble_layout 组件行的算法一致（test_module_editor 里拿真气泡核对）；
+    设置窗的测试区按这个宽度摆组件，排版才和气泡里一样。"""
+    return (bubble_token("width") - 2 * bubble_token("outer_margin")
+            - 2 * bubble_token("handle_width") - 2 * bs(5))
+
+
 def health_token(kind, key="color"):
     """Return a stable color/label for a module health state."""
     item = HEALTH_TOKENS.get(str(kind or "ok"), HEALTH_TOKENS["ok"])

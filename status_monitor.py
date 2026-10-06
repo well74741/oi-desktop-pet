@@ -2576,6 +2576,64 @@ def _visible_popups():
     return out
 
 
+def popup_slots(sizes, pet_c, pet_top, screen, bubble=None, menu_top=None, margin=6):
+    """弹出气泡该摆哪：返回每个气泡左上角 [(x, y)]，从下往上叠。纯计算，方便测。
+
+    sizes：[(w, h)]；pet_c：桌宠中心 x；pet_top：桌宠头顶 y；screen：(左, 上, 右, 下)；
+    bubble：主气泡栏 (左, 上, 右, 下)，没显示就 None；menu_top：菜单展开时盘的上缘。
+
+    先叠在桌宠头顶（菜单展开就叠在盘上方）；和主气泡栏重叠就往**远离气泡栏的一侧**
+    让开；两侧都放不下才叠到气泡栏上方（气泡栏在桌宠下面就叠到它下方）。
+    以前只要气泡栏显示着就一律叠在它上缘之上 —— 气泡放大后气泡栏很高，弹出气泡
+    被顶到离桌宠老远的地方（用户截图），哪怕气泡栏在桌宠旁边、头顶明明空着。
+    """
+    left, top, right, bottom = screen
+
+    def stack(anchor, upward, cx=None, x_left=None, x_right=None):
+        out, y = [], anchor
+        for w, h in sizes:
+            if upward:
+                y -= h
+            if x_left is not None:
+                x = x_left
+            elif x_right is not None:
+                x = x_right - w
+            else:
+                x = cx - w // 2
+            x = max(left, min(int(x), right - w))
+            yy = max(top, min(int(y), bottom - h))
+            out.append((x, yy))
+            y = y - margin if upward else y + h + margin
+        return out
+
+    def hits(slots):
+        if bubble is None:
+            return False
+        bl, bt, br, bb = bubble
+        return any(x < br and x + w > bl and y < bb and y + h > bt
+                   for (x, y), (w, h) in zip(slots, sizes))
+
+    anchor = (menu_top if menu_top is not None else pet_top) - margin
+    slots = stack(anchor, True, cx=pet_c)
+    if not hits(slots):
+        return slots
+    bl, bt, br, bb = bubble
+    wmax = max(w for w, _h in sizes)
+    if (bl + br) / 2.0 >= pet_c:      # 气泡栏在右边 → 往左让，反之往右
+        tries = [dict(x_right=bl - margin), dict(x_left=br + margin)]
+    else:
+        tries = [dict(x_left=br + margin), dict(x_right=bl - margin)]
+    for t in tries:
+        edge_ok = (t.get("x_left", 0) + wmax <= right) if "x_left" in t             else (t["x_right"] - wmax >= left)
+        if edge_ok:
+            slots = stack(anchor, True, **t)
+            if not hits(slots):
+                return slots
+    if bt < pet_top:
+        return stack(bt - margin, True, cx=pet_c)
+    return stack(bb + margin, False, cx=pet_c)
+
+
 def _reflow_popups(pet):
     """让所有可见弹出气泡自动避让：纵向堆叠、互不重合，并跟随桌宠移动。"""
     try:
@@ -2588,47 +2646,17 @@ def _reflow_popups(pet):
         menu = getattr(pet, "radial_menu", None)
         menu_open = bool(menu and getattr(menu, "is_visible_state", False)
                          and menu._sector_outer() > 0)
-        main_bubble = getattr(pet, "status_bubble", None)
-        main_visible = bool(main_bubble is not None and main_bubble.isVisible()
-                            and main_bubble.height() > 0)
-        margin = 6
-        if main_visible:
-            # 主气泡栏可见：堆在气泡栏外侧，绝不盖住气泡栏内容
-            # （菜单展开时主气泡栏已在菜单上方，弹出气泡随之堆到主气泡栏上方）
-            mb_top = main_bubble.y()
-            mb_bottom = main_bubble.y() + main_bubble.height()
-            pet_top = pc.y() - pet.height() // 2
-            if mb_top < pet_top:
-                anchor = mb_top - margin          # 气泡栏在桌宠上方 → 堆在气泡栏上缘之上
-                upward = True
-            else:
-                anchor = mb_bottom + margin       # 气泡栏在桌宠下方 → 堆在气泡栏下缘之下
-                upward = False
-        elif menu_open:
-            # 只有菜单展开且主气泡栏不可见：堆在菜单盘上方，更靠外
-            anchor = pc.y() - menu._sector_outer() - margin
-            upward = True
-        else:
-            # 独立弹出：堆在桌宠上方
-            anchor = pc.y() - pet.height() // 2 - margin
-            upward = True
-        y = anchor
-        for w in vis:
-            h = w.height()
-            if upward:
-                y -= h
-            x = pc.x() - w.width() // 2
-            x = max(g.left(), min(int(x), g.right() - w.width()))
-            if y < g.top():
-                y = g.top()
-            if y + h > g.bottom():
-                y = g.bottom() - h
-            if (w.x(), w.y()) != (int(x), int(y)):
-                w.move(int(x), int(y))
-            if upward:
-                y -= margin
-            else:
-                y += h + margin
+        mb = getattr(pet, "status_bubble", None)
+        bubble = None
+        if mb is not None and mb.isVisible() and mb.height() > 0:
+            bubble = (mb.x(), mb.y(), mb.x() + mb.width(), mb.y() + mb.height())
+        slots = popup_slots(
+            [(w.width(), w.height()) for w in vis], pc.x(), pc.y() - pet.height() // 2,
+            (g.left(), g.top(), g.right() + 1, g.bottom() + 1), bubble,
+            (pc.y() - menu._sector_outer()) if menu_open else None)
+        for w, (x, y) in zip(vis, slots):
+            if (w.x(), w.y()) != (x, y):
+                w.move(x, y)
     except Exception:
         pass
 
