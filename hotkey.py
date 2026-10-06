@@ -296,6 +296,17 @@ class HotkeyEdit(QLineEdit):
         self._before = ""
         self.setPlaceholderText("点这里，按下组合键")
         self.setClearButtonEnabled(True)
+        # 清空按钮（Qt 自己建的那个 ✕）的图标要显式放大到 24：旧版的整树放大会把
+        # 每个按钮的 iconSize 一起乘 1.5（默认 16 → 24），那套删掉之后不补这一下，
+        # 叉号会比原来小一圈。
+        try:
+            from PyQt5.QtCore import QSize
+            from PyQt5.QtWidgets import QToolButton
+            _clear = self.findChild(QToolButton)
+            if _clear is not None:
+                _clear.setIconSize(QSize(24, 24))
+        except Exception:
+            pass
         # 中文输入法开着时空格会被拿去选字/上屏，录入框里没有输入法的事
         self.setAttribute(Qt.WA_InputMethodEnabled, False)
         self._hook = None

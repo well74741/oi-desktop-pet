@@ -17,9 +17,9 @@ from widgets import kit
 class Widget(ModuleWidget):
     """番茄时钟：工作 25 分钟 / 休息 5 分钟，倒计时 + 三个按钮。"""
 
-    FIX_H = 78
+    FIX_H = 117
     _QSS = (
-        "QLabel{color:#e8ecf5;font-family:Microsoft YaHei;font-size:11px;}"
+        "QLabel{color:#e8ecf5;font-family:Microsoft YaHei;font-size:16.5px;}"
     )
 
     def current_height(self):
@@ -39,17 +39,17 @@ class Widget(ModuleWidget):
         self.setStyleSheet(self.styleSheet() + "\n" + kit.action_qss(False))
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(kit.bs(4), kit.bs(2),
-                               kit.bs(4), kit.bs(4))   # 底部留白，按钮不贴卡片下框
-        lay.setSpacing(kit.bs(2))
+        lay.setContentsMargins(kit.bs(6), kit.bs(3),
+                               kit.bs(6), kit.bs(6))   # 底部留白，按钮不贴卡片下框
+        lay.setSpacing(kit.bs(3))
         self.time_label = QLabel()
         self.time_label.setAlignment(Qt.AlignCenter)
-        f = kit.font_pt(16)
+        f = kit.font_pt(24)
         self.time_label.setFont(f)
         lay.addWidget(self.time_label)
 
         btns = QHBoxLayout()
-        btns.setSpacing(kit.bs(4))
+        btns.setSpacing(kit.bs(6))
         self.start_btn = QPushButton("开始")
         self.pause_btn = QPushButton("暂停")
         self.reset_btn = QPushButton("重置")

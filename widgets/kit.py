@@ -4,7 +4,7 @@
 用法（在自定义组件里）：
     from widgets import kit
 
-    self.title = kit.lab("标题", size=12, bold=True)
+    self.title = kit.lab("标题", size=18, bold=True)
     self.btn = kit.btn("开始", primary=True)
     self.sw = kit.switch(False)
     self.bar = kit.progress(60)
@@ -20,7 +20,7 @@
   不要给根控件 setFixedHeight（除非你想锁死高度）。
 """
 
-from PyQt5.QtCore import Qt, QPointF, QRect, QSize
+from PyQt5.QtCore import Qt, QPointF, QRect, QSize, QTimer
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt5.QtWidgets import (QAbstractButton, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
                              QLabel, QLayout,
@@ -38,42 +38,40 @@ _FONT = "Microsoft YaHei"
 _BUBBLE_SCALE = 1.0
 _PET_SCALE = 1.0
 
-# 界面基准倍率：所有逻辑尺寸在此基础上放大（字号/间距/控件尺寸按数值放大，
-# 渲染仍是 1 倍，文字保持清晰）。以前靠强制 QT_SCALE_FACTOR=1.5 实现同样的
-# 视觉大小，但那会让 Qt 以 1.5 倍设备像素比渲染——100% 屏上文字发灰发糊，
-# 且多屏时逻辑坐标不连续。可用环境变量 OI_UI_SCALE 覆盖。
-try:
-    import os as _os
-    UI_BASE = max(0.5, min(3.0, float(_os.environ.get("OI_UI_SCALE", "1.5"))))
-except Exception:
-    UI_BASE = 1.5
+# 【历史】这里曾经有个 UI_BASE = 1.5：所有窗口尺寸在运行时统一乘它一次
+# （更早是强制 QT_SCALE_FACTOR=1.5）。屏幕缩放本来就由 Qt 高 DPI 支持处理，
+# 再乘一遍就成了"放大两次"（检查更新窗 380 → 实际 855 宽）。
+# v0.9.42 起这个倍率被**烘进源码数值**：文件里的数字就是最终像素，不再有全局
+# 缩放；跨 DPI 交给 Qt。只有"应用默认字体"还需要它的大小，见 APP_FONT_PT。
+APP_FONT_PT = 13.5
 
 
 def ui(v):
-    """普通窗口（设置窗/对话框等）的逻辑尺寸按界面基准倍率放大。"""
-    return max(1, int(round(v * UI_BASE)))
+    """历史遗留的恒等函数：数值本身就是最终像素。保留是因为还有一批调用点传的是
+    变量（侧边栏宽度等），留着比逐个删更不容易出错。"""
+    return max(1, int(round(v)))
 
 
 # Bubble metrics live in one place. Values are standard-scale logical pixels;
 # bubble_token() scales them together with fonts, spacing, and controls.
 BUBBLE_TOKENS = {
-    "width": 210,
-    "row_height": 15,
-    "title_width": 44,
-    "head_height": 20,
-    "handle_width": 6,
-    "outer_margin": 2,
-    "card_radius": 4,
-    "card_margin": 5,
-    "action_radius": 4,
-    "action_height": 13,
-    "action_padding": 8,
-    "action_font": 10,
-    "icon": 13,
-    "icon_button_width": 16,
-    "icon_button_height": 15,
-    "toolbar_height": 16,
-    "caption_height": 12,
+    "width": 315,
+    "row_height": 22.5,
+    "title_width": 66,
+    "head_height": 30,
+    "handle_width": 9,
+    "outer_margin": 3,
+    "card_radius": 6,
+    "card_margin": 7.5,
+    "action_radius": 6,
+    "action_height": 19.5,
+    "action_padding": 12,
+    "action_font": 15,
+    "icon": 19.5,
+    "icon_button_width": 24,
+    "icon_button_height": 22.5,
+    "toolbar_height": 24,
+    "caption_height": 18,
 }
 
 HEALTH_TOKENS = {
@@ -113,13 +111,14 @@ def pet_scale():
 
 
 def bubble_k():
-    """气泡实际放大系数 = 气泡档位 × 界面基准倍率。拿原始尺寸做乘法时用它。"""
-    return _BUBBLE_SCALE * UI_BASE
+    """气泡实际放大系数 = 用户选的气泡档位。以前还乘一个界面基准倍率 1.5，
+    那个 1.5 已烘进 BUBBLE_TOKENS 和各处 bs() 参数。"""
+    return _BUBBLE_SCALE
 
 
 def pet_k():
-    """桌宠实际放大系数 = 桌宠档位 × 界面基准倍率。"""
-    return _PET_SCALE * UI_BASE
+    """桌宠实际放大系数 = 用户选的桌宠档位。1.5 的界面倍率已烘进各处 ps() 参数。"""
+    return _PET_SCALE
 
 
 def bs(v):
@@ -140,7 +139,7 @@ def bubble_widget_width():
     和 bubble_layout 组件行的算法一致（test_module_editor 里拿真气泡核对）；
     设置窗的测试区按这个宽度摆组件，排版才和气泡里一样。"""
     return (bubble_token("width") - 2 * bubble_token("outer_margin")
-            - 2 * bubble_token("handle_width") - 2 * bs(5))
+            - 2 * bubble_token("handle_width") - 2 * bs(7.5))
 
 
 def health_token(kind, key="color"):
@@ -149,24 +148,24 @@ def health_token(kind, key="color"):
     return item.get(key, "")
 
 
-def text_height(size=7.5):
+def text_height(size=11.25):
     """Return rendered text height so row heights never clip CJK glyphs."""
     try:
-        return max(bs(10), QFontMetrics(font_pt(size)).height())
+        return max(bs(15), QFontMetrics(font_pt(size)).height())
     except Exception:
-        return bs(10)
+        return bs(15)
 
 
 def row_height():
     """Standard module title/text row height, including enough CJK leading.
 
-    Budget the card's own top/bottom margin as `2 * bs(1)`, not `bs(2)`:
-    the card applies bs(1) twice and bs() rounds each call, so at bubble
-    scale 1.5 that is 2+2=4 while bs(2) is only 3. That 1px shortfall meant
+    Budget the card's own top/bottom margin as `2 * bs(1.5)`, not `bs(3)`:
+    the card applies bs(1.5) twice and bs() rounds each call, so at bubble
+    scale 1.5 that is 2+2=4 while bs(3) is only 3. That 1px shortfall meant
     the text widget's minimum height no longer fitted inside the card, the
     layout overflowed downwards and every value looked pushed down / clipped.
     """
-    return max(bubble_token("row_height"), text_height(7.5) + 2 * bs(1))
+    return max(bubble_token("row_height"), text_height(11.25) + 2 * bs(1.5))
 
 
 def header_row_height(has_summary=False):
@@ -176,11 +175,11 @@ def header_row_height(has_summary=False):
 
 def toolbar_height():
     return max(bubble_token("toolbar_height"),
-               bubble_token("icon_button_height") + bs(1))
+               bubble_token("icon_button_height") + bs(1.5))
 
 
 def caption_height():
-    return max(bubble_token("caption_height"), text_height(7.5) + bs(3))
+    return max(bubble_token("caption_height"), text_height(11.25) + bs(4.5))
 
 
 class ElidedLabel(QLabel):
@@ -243,13 +242,13 @@ def scale_qss(qss):
     try:
         import re as _re
         return _re.sub(
-            r"(\d+)px",
-            lambda m: "%dpx" % bs(int(m.group(1))), qss)
+            r"(\d+(?:\.\d+)?)px",
+            lambda m: "%dpx" % bs(float(m.group(1))), qss)
     except Exception:
         return qss
 
 
-def lab(text="", size=11, color="#e8ecf5", bold=False, align=None, wrap=True):
+def lab(text="", size=16.5, color="#e8ecf5", bold=False, align=None, wrap=True):
     """通用文字标签。字号按气泡档位（bubble_scale）整体缩放。"""
     l = QLabel(str(text))
     f = font_pt(size)
@@ -291,7 +290,7 @@ def btn(text, primary=False, small=False, fixed_w=None):
     b.setFixedHeight(bubble_token("action_height"))
     b.setStyleSheet(action_qss(primary))
     if fixed_w:
-        b.setFixedWidth(bs(int(fixed_w)))
+        b.setFixedWidth(bs(fixed_w))
     return b
 
 
@@ -302,9 +301,9 @@ def switch(checked=False, on_text="开", off_text="关"):
     cb.setChecked(checked)
     cb.setCursor(Qt.PointingHandCursor)
     cb.setStyleSheet(scale_qss(
-        "QCheckBox{font-family:%s;font-size:10px;color:#c7d0e0;"
-        "background:transparent;spacing:4px;}"
-        "QCheckBox::indicator{width:24px;height:12px;border-radius:6px;"
+        "QCheckBox{font-family:%s;font-size:15px;color:#c7d0e0;"
+        "background:transparent;spacing:6px;}"
+        "QCheckBox::indicator{width:36px;height:18px;border-radius:9px;"
         "background:rgba(255,255,255,45);}"
         "QCheckBox::indicator:checked{background:qlineargradient(x1:0,y1:0,"
         "x2:1,y2:0,stop:0 #4a90e2,stop:1 #2fb8c0);}"
@@ -312,14 +311,14 @@ def switch(checked=False, on_text="开", off_text="关"):
     return cb
 
 
-def progress(value=0, maximum=100, height=8):
+def progress(value=0, maximum=100, height=12):
     """细进度条（无文字）。高度/圆角按气泡档位缩放。"""
     p = QProgressBar()
     p.setRange(0, max(1, int(maximum)))
     p.setValue(int(value))
     p.setTextVisible(False)
-    p.setFixedHeight(bs(int(height)))
-    h2 = max(1, bs(int(height)) // 2)
+    p.setFixedHeight(bs(height))
+    h2 = max(1, bs(height) // 2)
     p.setStyleSheet(
         "QProgressBar{background:rgba(255,255,255,25);border:none;"
         "border-radius:%dpx;}"
@@ -330,7 +329,11 @@ def progress(value=0, maximum=100, height=8):
 
 
 def hsep():
-    """细横分隔线。"""
+    """细横分隔线。
+
+    1px 不乘 1.5：这条样式表是直接 setStyleSheet 下去的，而 hsep() 只用在组件里
+    （气泡/测试区都标了 oi_nozoom），旧版的整树放大根本没碰它 —— 一直都是 1px 发丝线。
+    """
     f = QFrame()
     f.setFrameShape(QFrame.HLine)
     f.setStyleSheet("background:rgba(255,255,255,35);border:none;"
@@ -339,7 +342,7 @@ def hsep():
     return f
 
 
-def row(*items, spacing=4, margins=(0, 0, 0, 0)):
+def row(*items, spacing=6, margins=(0, 0, 0, 0)):
     """横向布局助手：逻辑间距/边距按气泡档位统一缩放。"""
     lay = QHBoxLayout()
     lay.setSpacing(bs(spacing))
@@ -354,7 +357,7 @@ def row(*items, spacing=4, margins=(0, 0, 0, 0)):
     return lay
 
 
-def col(*items, spacing=4, margins=(0, 0, 0, 0)):
+def col(*items, spacing=6, margins=(0, 0, 0, 0)):
     """纵向布局助手：逻辑间距/边距按气泡档位统一缩放。"""
     lay = QVBoxLayout()
     lay.setSpacing(bs(spacing))
@@ -369,11 +372,11 @@ def col(*items, spacing=4, margins=(0, 0, 0, 0)):
     return lay
 
 
-def scroll(body, max_h=120):
+def scroll(body, max_h=180):
     """透明滚动容器：内容超高时出现细滚动条，用于列表/日志等。高度按气泡档位缩放。"""
     sa = QScrollArea()
     sa.setWidgetResizable(True)
-    sa.setFixedHeight(bs(int(max_h)))
+    sa.setFixedHeight(bs(max_h))
     sa.setFrameShape(QFrame.NoFrame)
     sa.setStyleSheet("QScrollArea{background:transparent;border:none;}")
     sa.setWidget(body)
@@ -382,7 +385,7 @@ def scroll(body, max_h=120):
 
 # ==================== 模块行规范件（4.6.1 可展开模块布局规范） ====================
 
-_TITLE7_W = 44   # 模块行标题固定列宽（与其他模块对齐）
+_TITLE7_W = 66   # 模块行标题固定列宽（与其他模块对齐）
 
 
 class ScrollLabel(QLabel):
@@ -513,7 +516,7 @@ def title7(text="", color="#96a7c4"):
     标题比这一列宽时改为横向滚动（"Token 消耗"以前会被裁成"Token 消"）。"""
     l = ScrollLabel(str(text))
     f = QFont(_FONT)
-    f.setPointSizeF(7.5 * bubble_k())
+    f.setPointSizeF(11.25 * bubble_k())
     l.setFont(f)
     l.setFixedWidth(bs(_TITLE7_W))
     l.setFixedHeight(row_height())
@@ -526,12 +529,12 @@ def title7(text="", color="#96a7c4"):
 def caption(text="", color="#6f7d96", wrap=False):
     """Small module text with the same type scale and clipping rules."""
     if wrap:
-        l = lab(text, size=7.5, color=color, wrap=True)
+        l = lab(text, size=11.25, color=color, wrap=True)
         l.setMinimumHeight(caption_height())
         l.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
         return l
     l = ElidedLabel(text)
-    l.setFont(font_pt(7.5))
+    l.setFont(font_pt(11.25))
     l.set_color(color)
     l.setStyleSheet("color:%s;background:transparent;" % color)
     l.setFixedHeight(caption_height())
@@ -549,7 +552,7 @@ def module_row(title="", summary=None, actions=()):
     host.setFixedHeight(h)
     lay = QHBoxLayout(host)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(bs(4))
+    lay.setSpacing(bs(6))
     title_label = title7(title)
     lay.addWidget(title_label, 0, Qt.AlignVCenter)
 
@@ -584,12 +587,12 @@ def expand_btn(text="展开", fixed_w=None):
     return btn(text, primary=True, fixed_w=fixed_w)
 
 
-def ghost_btn(text="", fixed_w=18, fixed_h=13, tip=""):
+def ghost_btn(text="", fixed_w=27, fixed_h=19.5, tip=""):
     """透明辅助按钮：与主按钮同行高同圆角，仅弱化底色。"""
     b = QPushButton(str(text))
     b.setCursor(Qt.PointingHandCursor)
-    b.setFixedSize(bs(int(fixed_w)),
-                   max(bubble_token("action_height"), bs(int(fixed_h))))
+    b.setFixedSize(bs(fixed_w),
+                   max(bubble_token("action_height"), bs(fixed_h)))
     if tip:
         b.setToolTip(tip)
     b.setStyleSheet(
@@ -597,7 +600,7 @@ def ghost_btn(text="", fixed_w=18, fixed_h=13, tip=""):
         "font-size:%dpx;color:#cfe0ff;background:transparent;}"
         "QPushButton:hover{background:rgba(74,144,226,140);color:#ffffff;}"
         "QPushButton:pressed{background:#3a80d0;}"
-        % (bs(4), _FONT, bs(10)))
+        % (bs(6), _FONT, bs(15)))
     return b
 
 
@@ -615,14 +618,14 @@ PALETTE = ["#ff6b6b", "#ffa94d", "#ffd43b", "#69db7c", "#38d9a9",
 # 黄底）——同一个气泡里悬停标题和悬停按钮能弹出两种长相。main.py 把它挂到
 # QApplication 上，所有窗口继承；谁都不要再写自己的 QToolTip 规则。
 TOOLTIP_QSS = ("QToolTip{background:#232a3a;color:#d5dbe8;"
-               "border:1px solid #4a5468;border-radius:4px;padding:3px 6px;}")
+               "border:2px solid #4a5468;border-radius:6px;padding:4px 9px;}")
 
 
 # ==================== 弹窗按钮规范（QMessageBox / QInputDialog 通用） ====================# 统一形状（边框+圆角+底色）、适中尺寸。全局弹窗（main.py 的 QApplication QSS）与
 # kit.confirm / 各组件弹窗都用它，避免"有字没形状 / 忽大忽小"。
 DIALOG_BTN_QSS = (
-    "QPushButton{min-width:52px;min-height:21px;font-size:10px;"
-    "border:1px solid rgba(110,126,150,150);border-radius:4px;padding:0 12px;"
+    "QPushButton{min-width:78px;min-height:32px;font-size:15px;"
+    "border:2px solid rgba(110,126,150,150);border-radius:6px;padding:0 18px;"
     "background:#ffffff;color:#2a3140;}"
     "QPushButton:hover{background:#eaf1fb;border-color:#4a90e2;color:#2a3140;}"
     "QPushButton:pressed{background:#d5dbe8;}"
@@ -646,7 +649,7 @@ class TitleIconButton(QAbstractButton):
     竖条/横条。QAbstractButton 不匹配 QPushButton 选择器，尺寸只由自己决定。
     """
 
-    def __init__(self, kind, parent=None, size=24):
+    def __init__(self, kind, parent=None, size=36):
         super().__init__(parent)
         self._kind = kind            # "close" | "help"
         self._side = int(size)
@@ -705,18 +708,18 @@ class DarkTitleBar(QWidget):
 
     def __init__(self, title="", parent=None):
         super().__init__(parent)
-        self.setFixedHeight(28)   # 对 12px 标题字号足够；过高会在内容上方留空带
+        self.setFixedHeight(42)   # 对 12px 标题字号足够；过高会在内容上方留空带
         self.setObjectName("dlgTitleBar")
         self.setStyleSheet(
-            "#dlgTitleBar{background:#1b2130;border-bottom:1px solid #39414f;}")
+            "#dlgTitleBar{background:#1b2130;border-bottom:2px solid #39414f;}")
         self._drag_off = None
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 0, 2, 0)
-        lay.setSpacing(3)
+        lay.setContentsMargins(15, 0, 3, 0)
+        lay.setSpacing(4)
         lay.setAlignment(Qt.AlignVCenter)
         self.title_lab = QLabel(str(title), self)
         self.title_lab.setStyleSheet(
-            "color:#d5dbe8;font-family:'Microsoft YaHei';font-size:12px;"
+            "color:#d5dbe8;font-family:'Microsoft YaHei';font-size:18px;"
             "background:transparent;")
         lay.addWidget(self.title_lab, 1)
         self.help_btn = TitleIconButton("help", self)
@@ -763,13 +766,13 @@ class DarkDialog(QDialog):
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         super().setWindowTitle(str(title))
         self._outer = QVBoxLayout(self)
-        self._outer.setContentsMargins(1, 1, 1, 1)
+        self._outer.setContentsMargins(2, 2, 2, 2)
         self._outer.setSpacing(0)
         self.title_bar = DarkTitleBar(title, self)
         self._outer.addWidget(self.title_bar)
         self.body = QWidget(self)
         self._outer.addWidget(self.body, 1)
-        self.setStyleSheet("QDialog{background:#1e2430;border:1px solid #39414f;}")
+        self.setStyleSheet("QDialog{background:#1e2430;border:2px solid #39414f;}")
 
     def setWindowTitle(self, title):
         super().setWindowTitle(str(title))
@@ -784,7 +787,14 @@ class DarkDialog(QDialog):
         `_MsgDialog` 会另外把自己挪到操作区附近（见 place_near）；这里只保证
         "整块可见"这条底线，不改变别的弹窗原本的位置策略。
         """
+        # 首次显示前把样式表再下发一次：子控件多是"构造完样式表之后"才建的，
+        # 直接显示会让 QSS 里的字号/尺寸对它们不生效（见 restyle 的说明）。
+        if not self.property("oiRestyled"):
+            self.setProperty("oiRestyled", True)
+            restyle(self)
         super().showEvent(event)
+        # polish 完才轮到调色板：此时才能把输入框的占位提示色钉上去（见 dark_placeholder）
+        dark_placeholder(self)
         try:
             from PyQt5.QtWidgets import QApplication
             g = self.frameGeometry()
@@ -828,28 +838,28 @@ class _MsgDialog(DarkDialog):
         self._anchor = parent if isinstance(parent, QWidget) else None
         self._ok = False
         lay = QVBoxLayout(self.body)
-        lay.setContentsMargins(16, 14, 16, 12)
-        lay.setSpacing(12)
+        lay.setContentsMargins(24, 21, 24, 18)
+        lay.setSpacing(18)
         msg = QLabel(str(text), self.body)
         msg.setWordWrap(True)
         msg.setStyleSheet(
-            "color:#d5dbe8;font-family:'Microsoft YaHei';font-size:12px;"
+            "color:#d5dbe8;font-family:'Microsoft YaHei';font-size:18px;"
             "background:transparent;")
-        msg.setMinimumWidth(260)
+        msg.setMinimumWidth(390)
         lay.addWidget(msg, 1)
         row = QHBoxLayout()
         row.addStretch()
         _qss_main = (
-            "QPushButton{min-width:64px;min-height:24px;font-size:12px;"
-            "border:1px solid %s;border-radius:4px;padding:2px 14px;"
+            "QPushButton{min-width:96px;min-height:36px;font-size:18px;"
+            "border:2px solid %s;border-radius:6px;padding:3px 21px;"
             "background:%s;color:#ffffff;}"
             "QPushButton:hover{background:%s;}")
         if confirm_mode:
             no = QPushButton("取消", self.body)
             no.setCursor(Qt.PointingHandCursor)
             no.setStyleSheet(
-                "QPushButton{min-width:64px;min-height:24px;font-size:12px;"
-                "border:1px solid #4a5468;border-radius:4px;padding:2px 14px;"
+                "QPushButton{min-width:96px;min-height:36px;font-size:18px;"
+                "border:2px solid #4a5468;border-radius:6px;padding:3px 21px;"
                 "background:#2b3446;color:#d5dbe8;}"
                 "QPushButton:hover{background:#39414f;}")
             no.clicked.connect(self.reject)
@@ -877,13 +887,77 @@ class _MsgDialog(DarkDialog):
 
     def showEvent(self, event):
         # 摆位必须在这里做，不能在构造后立刻做：弹窗要等 Polish 事件才按
-        # UI_BASE 放大（见下方"普通窗口统一放大"），构造完那会儿量到的是放大前
+        # 应用字体/尺寸设置之后才算得准，构造完那会儿量到的是旧的
         # 的尺寸，照那个尺寸算出来的居中位置是偏的。
         super().showEvent(event)
         place_near(self, self._anchor)
 
     def result_ok(self):
         return self._ok
+
+
+def restyle(w):
+    """把 w 所在窗口的样式表**重新下发一次**，强制晚建的子控件重新解析样式。
+
+    为什么需要：控件创建过程中如果调用了 ensurePolished()，而那时它还没挂进布局，
+    Qt 解析不到祖先窗口的样式表；之后再挂上去也不会重新解析（已处于 polished 状态），
+    于是 QSS 里声明的字号/尺寸对它不生效。旧版靠 Polish 事件里的整树放大顺带做到了
+    这件事，那套删除后必须显式补一次。
+
+    注意：这里修不了输入框占位提示的颜色。QPalette.PlaceholderText 是 Qt 从解析好的
+    Text 颜色派生的，而 Text 要等控件 polish 完才是 QSS 里的值，重下样式表不改变
+    这个顺序。占位色由 dark_placeholder() 显式指定，见那里的说明。
+    """
+    try:
+        d = w.window() if hasattr(w, "window") else None
+        if d is None:
+            return
+        ss = d.styleSheet()
+        if ss:
+            d.setStyleSheet(ss)
+        # 重下样式表会把晚建控件的调色板整份换掉，占位色得跟着补一次
+        dark_placeholder(d)
+    except Exception:
+        pass
+
+
+def dark_placeholder(dlg, color=None):
+    """把窗口里每个输入框的占位提示色，按它自己解析后的文字色 ×50% 透明钉上去。
+
+    为什么不能靠 Qt 自己派生：QPalette.PlaceholderText 是从**解析好的** Text 色推出来
+    的，而 QSS 里的 `color:` 要等控件 polish 之后才落到 Text 上。旧版整树放大的那套
+    代码顺带让调色板早早解析过一轮，占位色跟着对了；那套删掉以后，Qt 推导时 Text 还是
+    默认黑色，于是占位提示变成"黑色 50%"——深色底上几乎看不见
+    （"留空 = 已到点"这类提示就是这么糊掉的）。
+
+    为什么逐个子控件设、而不是设在窗口上：QSS 给每个子控件下发的是**整份**调色板，
+    会把从父窗口继承来的角色一起盖掉。设在子控件自己身上才留得住。
+
+    为什么按各自的 Text 取色、不写死一个值：同一套深色样式里不同窗口的输入框文字色
+    并不一样（设置窗 #dfe6f2、AI 设置窗 #d5dbe8），写死一个就会有一个窗口偏色。
+    color 不为 None 时按它取，仅给"文字色还没解析出来"的兜底场景用。
+    """
+    try:
+        from PyQt5.QtGui import QColor, QPalette
+        from PyQt5.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit, QTextEdit
+        targets = []
+        for cls in (QLineEdit, QPlainTextEdit, QTextEdit, QComboBox):
+            targets.extend(dlg.findChildren(cls))
+        for w in targets:
+            pal = w.palette()
+            base = QColor(color) if color else pal.color(QPalette.Active, QPalette.Text)
+            if not base.isValid() or (base.red() == 0 and base.green() == 0
+                                      and base.blue() == 0):
+                continue          # 文字色还没解析（纯黑=默认值），这轮先不动
+            c = QColor(base)
+            c.setAlpha(128)
+            if pal.color(QPalette.Active, QPalette.PlaceholderText) == c:
+                continue                      # 已经对了，别反复 setPalette
+            for grp in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+                pal.setColor(grp, QPalette.PlaceholderText, c)
+            w.setPalette(pal)
+    except Exception:
+        pass
 
 
 def place_near(dlg, anchor=None):
@@ -945,17 +1019,11 @@ def warn(parent, title, text):
     _show_msg(parent, title, text, confirm_mode=False)
 
 
-# ==================== 普通窗口统一放大（按数值放大，1 倍渲染）====================
-# 设置窗、对话框、弹窗等是标准 Qt 控件，尺寸散落在各处的样式表 px、固定尺寸和
-# 布局间距里。这里在每个控件**首次显示前**（Polish 事件，此时父子关系已建立）
-# 统一乘一次 UI_BASE：样式表 px、显式字号、最小/最大尺寸、布局边距/间距、
-# 定长占位、图标尺寸。渲染仍是 1 倍设备像素，文字清晰。
-#
-# 哪些控件放大——就近原则，沿"自身→父控件"链找第一个标记：
-#   · 属性 oi_nozoom=True：不放大（气泡/桌宠/径向菜单/组件已按 bs()/ps() 自己放大）
-#   · 属性 oi_zoom=True，或本身是 QDialog：放大
-#   · 都没有：放大（托盘菜单、提示框、下拉弹层等标准控件）
-# 已放大的控件打上 oiZ 标记；之后再 setStyleSheet 也会自动换算。
+# ==================== 应用默认字体 ====================
+# 这里曾经是一整套"运行时统一放大"：在每个控件的 Polish 事件里把样式表 px、显式字号、
+# 最小/最大尺寸、布局边距、图标尺寸统一乘 1.5，并劫持 QWidget.setStyleSheet 跟着换算。
+# v0.9.42 起全部删除 —— 源码里的数值就是最终像素。留下的只有"应用默认字体"：
+# 没显式设字号的控件（托盘菜单、提示框、系统标准弹窗）靠它和别处保持同样大小。
 
 import re as _re_zoom
 
@@ -964,12 +1032,12 @@ _QWIDGETSIZE_MAX = 16777215
 
 
 DARK_MENU_QSS = (
-    "QMenu{background:#232a3a;border:1px solid #4a5468;border-radius:6px;"
-    "padding:3px;font-family:'Microsoft YaHei';font-size:11px;color:#d5dbe8;}"
-    "QMenu::item{padding:5px 18px;border-radius:4px;margin:0 2px;}"
+    "QMenu{background:#232a3a;border:2px solid #4a5468;border-radius:9px;"
+    "padding:4px;font-family:'Microsoft YaHei';font-size:16px;color:#d5dbe8;}"
+    "QMenu::item{padding:8px 27px;border-radius:6px;margin:0 3px;}"
     "QMenu::item:selected{background:#4a90e2;color:#ffffff;}"
     "QMenu::item:disabled{color:#566070;background:transparent;}"
-    "QMenu::separator{height:1px;background:#39414f;margin:3px 6px;}")
+    "QMenu::separator{height:2px;background:#39414f;margin:4px 9px;}")
 
 
 def dark_menu(parent=None):
@@ -982,8 +1050,11 @@ def dark_menu(parent=None):
 
 
 def qss_k(qss, k):
-    """把样式表里的 Npx 按任意倍率 k 换算（0px 保持 0）。"""
-    if not qss or k == 1.0:
+    """把样式表里的 Npx 按任意倍率 k 换算（0px 保持 0），并**总是**归一成整数。
+
+    k==1.0 时不能直接返回原文：自缩放区的基准值写的是 4.5px 这类精确半像素，
+    直接交给 Qt 会被丢弃或截断。"""
+    if not qss:
         return qss
     return _PX_RE.sub(
         lambda m: "%dpx" % (0 if float(m.group(1)) == 0
@@ -992,181 +1063,36 @@ def qss_k(qss, k):
 
 
 def ui_qss(qss):
-    """把样式表里的 Npx 按界面基准倍率换算（0px 保持 0）。"""
-    return qss_k(qss, UI_BASE)
+    """普通窗口的样式表：px 即最终值，只做一次整数归一（不再放大）。
 
-
-def _zoom_wanted(w):
-    from PyQt5.QtWidgets import QDialog
-    p = w
-    while p is not None:
-        if p.property("oi_nozoom"):
-            return False
-        if p.property("oi_zoom") or isinstance(p, QDialog):
-            return True
-        p = p.parentWidget()
-    return True
-
-
-def _zoom_layout(lay, inherited=None):
-    """放大布局的边距/间距/固定空白。
-
-    子布局没显式设间距时，Qt 的 spacing() 返回的是从父布局继承来的值；父布局放大后
-    它会自动跟着变。若再对它 setSpacing(放大) 就成了二次放大（9→14）。所以先在父布局
-    改动之前读出"子布局间距 == 父布局间距"判定为继承，继承的子布局不动间距。
-    inherited=None 表示调用方不知道（单独调用），此时就地和父布局比一次。"""
-    if lay is None or lay.property("oiZ"):
-        return
-    lay.setProperty("oiZ", True)
-    try:
-        sp = lay.spacing()
-    except Exception:
-        sp = -1
-    if inherited is None:
-        try:
-            from PyQt5.QtWidgets import QLayout
-            par = lay.parent()
-            inherited = isinstance(par, QLayout) and par.spacing() == sp
-        except Exception:
-            inherited = False
-    # 改动本布局之前，先记下各子布局是否继承本布局的间距
-    subs = {}
-    for i in range(lay.count()):
-        it = lay.itemAt(i)
-        sub = it.layout() if it is not None else None
-        if sub is not None:
-            try:
-                subs[i] = (sub.spacing() == sp)
-            except Exception:
-                subs[i] = False
-    m = lay.contentsMargins()
-    lay.setContentsMargins(ui_i(m.left()), ui_i(m.top()),
-                           ui_i(m.right()), ui_i(m.bottom()))
-    if sp > 0 and not inherited:
-        try:
-            lay.setSpacing(ui_i(sp))
-        except Exception:
-            pass
-    for i in range(lay.count()):
-        it = lay.itemAt(i)
-        if it is None:
-            continue
-        sub = it.layout()
-        if sub is not None:
-            _zoom_layout(sub, subs.get(i, False))
-            continue
-        spc = it.spacerItem()
-        if spc is not None:
-            sh = spc.sizeHint()
-            pol = spc.sizePolicy()
-            spc.changeSize(ui_i(sh.width()), ui_i(sh.height()),
-                           pol.horizontalPolicy(), pol.verticalPolicy())
-    lay.invalidate()
+    自缩放区的基准值里有 4.5px 这类精确半像素（见文件头说明），直接交给 Qt 会被
+    丢弃或截断，所以这里统一归一。"""
+    return qss_k(qss, 1.0)
 
 
 def ui_i(v):
-    """整数尺寸按界面基准倍率换算（0 保持 0）。"""
-    return 0 if v <= 0 else max(1, int(round(v * UI_BASE)))
+    """整数尺寸（0 保持 0）。数值即最终值。"""
+    return 0 if v <= 0 else max(1, int(round(v)))
 
 
-def _zoom_widget(w):
-    from PyQt5.QtWidgets import QAbstractButton, QAbstractItemView
-    if w.property("oiZ"):
+def install_app_font(app):
+    """程序启动时调用一次：把应用默认字体设成 APP_FONT_PT。
+
+    旧版是"系统默认字号 × 1.5"（Windows 上 9pt → 13.5pt）。现在直接写死这个结果，
+    显示大小不变，也不再有全局倍率；没指定字号的控件都继承它。
+    """
+    if getattr(app, "_oi_app_font_set", False):
         return
-    w.setProperty("oiZ", True)
-    # 1) 样式表
-    ss = w.styleSheet()
-    if ss:
-        _ORIG_SET_SS(w, ui_qss(ss))
-    # 2) 显式字号（继承来的字号跟随父控件/应用字体，不重复放大）
-    if w.testAttribute(Qt.WA_SetFont):
-        f = w.font()
-        par = w.parentWidget()
-        base = par.font() if (par is not None and not w.isWindow()) else None
-        if f.pixelSize() > 0:
-            if base is None or f.pixelSize() != base.pixelSize():
-                f.setPixelSize(ui_i(f.pixelSize()))
-                w.setFont(f)
-        elif f.pointSizeF() > 0:
-            if base is None or abs(f.pointSizeF() - base.pointSizeF()) > 0.01:
-                if not _is_app_font_size(f.pointSizeF()):
-                    f.setPointSizeF(f.pointSizeF() * UI_BASE)
-                    w.setFont(f)
-    # 3) 最小 / 最大尺寸（含 setFixed*）
-    mn, mx = w.minimumSize(), w.maximumSize()
-    if mn.width() > 0 or mn.height() > 0:
-        w.setMinimumSize(ui_i(mn.width()), ui_i(mn.height()))
-    mw = mx.width() if mx.width() >= _QWIDGETSIZE_MAX else ui_i(mx.width())
-    mh = mx.height() if mx.height() >= _QWIDGETSIZE_MAX else ui_i(mx.height())
-    if mw != mx.width() or mh != mx.height():
-        w.setMaximumSize(mw, mh)
-    # 4) 布局
-    _zoom_layout(w.layout())
-    # 5) 图标尺寸
-    try:
-        if isinstance(w, (QAbstractButton, QAbstractItemView)):
-            s = w.iconSize()
-            if s.width() > 0:
-                from PyQt5.QtCore import QSize
-                w.setIconSize(QSize(ui_i(s.width()), ui_i(s.height())))
-    except Exception:
-        pass
-
-
-_APP_FONT_PT = [0.0]
-
-
-def _is_app_font_size(pt):
-    """字号恰好等于（已放大的）应用字体 → 是继承来的默认字号，不再放大。"""
-    return _APP_FONT_PT[0] > 0 and abs(pt - _APP_FONT_PT[0]) < 0.01
-
-
-def _setss_shim(self, qss):
-    if qss and self.property("oiZ"):
-        qss = ui_qss(qss)
-    _ORIG_SET_SS(self, qss)
-
-
-_ORIG_SET_SS = QWidget.setStyleSheet
-
-
-def install_ui_zoom(app):
-    """程序启动时调用一次（QApplication 创建之后、任何窗口创建之前）。"""
-    if UI_BASE == 1.0 or getattr(app, "_oi_zoom_installed", False):
-        return
-    from PyQt5.QtCore import QObject, QEvent
-    from PyQt5.QtWidgets import QToolTip
-
-    # 应用默认字体：没指定字号的控件（含托盘菜单、提示框、标准对话框）统一变大
     f = app.font()
-    if f.pointSizeF() > 0:
-        f.setPointSizeF(f.pointSizeF() * UI_BASE)
-        _APP_FONT_PT[0] = f.pointSizeF()
-    elif f.pixelSize() > 0:
-        f.setPixelSize(ui_i(f.pixelSize()))
+    f.setPointSizeF(APP_FONT_PT)
     app.setFont(f)
     try:
+        from PyQt5.QtWidgets import QToolTip
         QToolTip.setFont(f)
     except Exception:
         pass
-    # 应用级样式表（main.py 设置的弹窗字号等）
-    try:
-        if app.styleSheet():
-            app.setStyleSheet(ui_qss(app.styleSheet()))
-    except Exception:
-        pass
+    app._oi_app_font_set = True
 
-    class _Filter(QObject):
-        def eventFilter(self, obj, ev):
-            if ev.type() == QEvent.Polish and isinstance(obj, QWidget):
-                try:
-                    if not obj.property("oiZ") and _zoom_wanted(obj):
-                        _zoom_widget(obj)
-                except Exception:
-                    pass
-            return False
 
-    app._oi_zoom_filter = _Filter(app)
-    app.installEventFilter(app._oi_zoom_filter)
-    QWidget.setStyleSheet = _setss_shim
-    app._oi_zoom_installed = True
+# 兼容旧名字（外部脚本/手动检查脚本还在用）
+install_ui_zoom = install_app_font

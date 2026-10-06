@@ -26,7 +26,7 @@ import data_store
 from widgets import ModuleWidget, kit
 from widgets import icons
 
-_FIX_W = 210          # 气泡固定宽（与 bubble_ui._FIX_W 一致）
+_FIX_W = 315          # 气泡固定宽（与 bubble_ui._FIX_W 一致）
 _RATIO = 3.0 / 4.0    # 画布 4:3
 _CANVAS_H = int(_FIX_W * _RATIO)   # 210 * 0.75 = 157
 
@@ -346,13 +346,13 @@ class CanvasView(QGraphicsView):
 class Widget(ModuleWidget):
     """气泡内无限画布：收起 = 单行按钮；展开 = 4:3 画布。"""
 
-    FIX_H = 15
+    FIX_H = 22.5
     _QSS = (
         # 提示框不在这里定义：全局唯一一套在 kit.TOOLTIP_QSS（main.py 挂到
         # QApplication）。这里以前有一套浅色的，于是同一个气泡里悬停画布按钮
         # 和悬停别的模块会弹出两种长相。
-        "QPushButton{border:none;border-radius:3px;padding:0 4px;"
-        "font-family:Microsoft YaHei;font-size:10px;color:#dbe3f0;background:transparent;}"
+        "QPushButton{border:none;border-radius:4.5px;padding:0 6px;"
+        "font-family:Microsoft YaHei;font-size:15px;color:#dbe3f0;background:transparent;}"
         "QPushButton:hover{background:rgba(74,144,226,120);color:#ffffff;}"
         "QPushButton:pressed{background:#3a80d0;color:#ffffff;}"
         "QPushButton:checked{background:rgba(74,144,226,170);color:#ffffff;}"
@@ -379,7 +379,7 @@ class Widget(ModuleWidget):
         self._fold_btn.clicked.connect(self._toggle_fold)
         # AI 按钮放标题行，和拼豆一致：收起状态也点得到，不用先展开再去悬浮
         # 工具栏里找（工具栏本来就挤）。
-        self._ai_btn = kit.ghost_btn("AI", 22, 13,
+        self._ai_btn = kit.ghost_btn("AI", 33, 13,
                                      "AI 绘画：让 AI 按描述在画布上作画 (Ctrl+A)")
         self._ai_btn.clicked.connect(self._ai_draw)
         # 标题/摘要/动作统一走模块行规范，避免每个组件手写一行布局。
@@ -407,7 +407,7 @@ class Widget(ModuleWidget):
         self._bar = QWidget(self._expand)
         self._bar.setStyleSheet(kit.scale_qss(
             "QWidget#canvasBar{background:rgba(20,24,34,220);"
-            "border:1px solid rgba(255,255,255,45);border-radius:5px;}"))
+            "border:1.5px solid rgba(255,255,255,45);border-radius:7.5px;}"))
         self._bar.setObjectName("canvasBar")
         self._bar_v = QVBoxLayout(self._bar)
         self._bar_v.setContentsMargins(3, 2, 3, 2)
@@ -439,14 +439,14 @@ class Widget(ModuleWidget):
         self._bar_tab = QPushButton("", self._expand)
         self._bar_tab.setToolTip("展开工具栏")
         self._bar_tab.setCursor(Qt.PointingHandCursor)
-        self._bar_tab.setFixedSize(kit.bubble_token("icon_button_width") + kit.bs(2),
+        self._bar_tab.setFixedSize(kit.bubble_token("icon_button_width") + kit.bs(3),
                                    kit.bubble_token("icon_button_height"))
         self._bar_tab.setIcon(self._pix_icon("unfold"))
         self._bar_tab.setIconSize(QSize(kit.bubble_token("icon"),
                                         kit.bubble_token("icon")))
         self._bar_tab.setStyleSheet(kit.scale_qss(
-            "QPushButton{border:1px solid rgba(255,255,255,45);border-radius:4px;"
-            "font-family:Microsoft YaHei;font-size:10px;color:#e8ecf5;"
+            "QPushButton{border:1.5px solid rgba(255,255,255,45);border-radius:6px;"
+            "font-family:Microsoft YaHei;font-size:15px;color:#e8ecf5;"
             "background:rgba(20,24,34,220);}"
             "QPushButton:hover{background:rgba(74,144,226,140);}"))
         self._bar_tab.clicked.connect(self._toggle_bar)
@@ -508,11 +508,11 @@ class Widget(ModuleWidget):
             cb = QPushButton("", self._bar_row2)
             cb.setToolTip("画笔颜色")
             # 尺寸/圆角与拼豆完全一致（bs(14) + radius 7），两个组件看着才是一套
-            cb.setFixedSize(kit.bs(14), kit.bs(14))
+            cb.setFixedSize(kit.bs(21), kit.bs(21))
             cb.setCursor(Qt.PointingHandCursor)
             cb.setStyleSheet(kit.scale_qss(
-                "QPushButton{border:1px solid rgba(255,255,255,70);"
-                "border-radius:7px;background:%s;}" % c))
+                "QPushButton{border:1.5px solid rgba(255,255,255,70);"
+                "border-radius:10.5px;background:%s;}" % c))
             cb.clicked.connect(lambda _=False, cc=c: self._set_color(cc))
             self._color_btns.append(cb)
             self._bar_row2_lay.addWidget(cb, 1)   # 与拼豆一致：色块平分整行
@@ -528,15 +528,15 @@ class Widget(ModuleWidget):
         self._width_slider = QSlider(Qt.Vertical, self._expand)
         self._width_slider.setRange(1, 12)
         self._width_slider.setValue(3)
-        self._width_slider.setFixedWidth(kit.bs(12))
+        self._width_slider.setFixedWidth(kit.bs(18))
         self._width_slider.setToolTip("笔刷粗细")
         self._width_slider.setStyleSheet(kit.scale_qss(
-            "QSlider{background:rgba(20,24,34,200);border:1px solid "
-            "rgba(255,255,255,45);border-radius:5px;}"
-            "QSlider::groove:vertical{width:3px;background:rgba(255,255,255,50);"
-            "border-radius:1px;}"
-            "QSlider::handle:vertical{height:8px;width:10px;margin:0 -4px;"
-            "border-radius:4px;background:#7db6ff;}"))
+            "QSlider{background:rgba(20,24,34,200);border:1.5px solid "
+            "rgba(255,255,255,45);border-radius:7.5px;}"
+            "QSlider::groove:vertical{width:4.5px;background:rgba(255,255,255,50);"
+            "border-radius:1.5px;}"
+            "QSlider::handle:vertical{height:12px;width:15px;margin:0 -6px;"
+            "border-radius:6px;background:#7db6ff;}"))
         self._width_slider.valueChanged.connect(self._set_width)
 
     def _set_tool(self, t):
@@ -551,13 +551,13 @@ class Widget(ModuleWidget):
         self._view.pen_color = c
         try:
             self._cur_color.setStyleSheet(kit.scale_qss(
-                "QLabel{border:1px solid rgba(255,255,255,70);border-radius:3px;"
+                "QLabel{border:1.5px solid rgba(255,255,255,70);border-radius:4.5px;"
                 "background:%s;}" % c))
         except Exception:
             pass
         for cb, cc in zip(self._color_btns, _PALETTE):
             cb.setStyleSheet(kit.scale_qss(
-                "QPushButton{border:2px solid %s;border-radius:7px;background:%s;}"
+                "QPushButton{border:3px solid %s;border-radius:10.5px;background:%s;}"
                 % ("#ffffff" if cc == c else "rgba(255,255,255,70)", cc)))
         # 有选中元素时：改其颜色（笔画改色 / 文字改色；照片无颜色属性）
         try:
@@ -599,8 +599,8 @@ class Widget(ModuleWidget):
     def current_height(self):
         if self._collapsed:
             return kit.row_height()
-        return (kit.row_height() + kit.bs(2) + kit.bs(_CANVAS_H)
-                + kit.bs(2) + kit.caption_height())
+        return (kit.row_height() + kit.bs(3) + kit.bs(_CANVAS_H)
+                + kit.bs(3) + kit.caption_height())
 
     def _toggle_fold(self):
         self._collapsed = not self._collapsed
@@ -641,7 +641,7 @@ class Widget(ModuleWidget):
         h = kit.bubble_token("icon_button_height")      # 与拼豆同高
         m = self._bar_v.contentsMargins()
         sp = self._bar_row1_lay.spacing()
-        edge = kit.bs(2)                        # 工具栏距画布左右边缘
+        edge = kit.bs(3)                        # 工具栏距画布左右边缘
         outer = max(min_w * 2, int(avail_w) - edge * 2)
         inner = max(min_w, outer - m.left() - m.right())
         # 一行放几个：按钮最少 min_w 宽，放不下才换行（正常档位下 9 个都放得下）
@@ -663,7 +663,7 @@ class Widget(ModuleWidget):
             self._bar_per_row = per_row
             self._reflow_bar_rows(per_row, h)
         try:
-            self._cur_color.setFixedHeight(max(kit.bs(10), h - kit.bs(2)))
+            self._cur_color.setFixedHeight(max(kit.bs(15), h - kit.bs(3)))
             self._cur_color.setMinimumWidth(min_w)
         except Exception:
             pass
@@ -685,7 +685,7 @@ class Widget(ModuleWidget):
         # 色块和拼豆一样是**固定的小圆点**：布局里给了 stretch=1，但固定尺寸
         # 会赢，stretch 只把多余空间摊成均匀的间隙（拼豆就是这个效果）。
         # 让色块跟着拉伸的话会变成一排椭圆。
-        sw = kit.bs(14)
+        sw = kit.bs(21)
         for cb in cbs:
             try:
                 if cb.width() != sw or cb.height() != sw:
@@ -728,7 +728,7 @@ class Widget(ModuleWidget):
         sl = getattr(self, "_width_slider", None)
         if sl is None or sl.isHidden():
             return 0
-        return sl.width() + kit.bs(4)
+        return sl.width() + kit.bs(6)
 
     def _place_side_slider(self):
         """竖着的粗细滑条：贴画布左边，纵向居中，高度取画布的一半左右。"""
@@ -737,10 +737,10 @@ class Widget(ModuleWidget):
             return
         w, h = self._expand.width(), self._expand.height()
         # 工具栏现在横跨整个画布宽度，滑条要让到它**下面**去，不然会被压住
-        top = 4 + (self._bar.height() if self._bar.isVisible() else 0) + kit.bs(4)
-        sh = max(kit.bs(40), min(int((h - top) * 0.6), kit.bs(110)))
+        top = 4 + (self._bar.height() if self._bar.isVisible() else 0) + kit.bs(6)
+        sh = max(kit.bs(60), min(int((h - top) * 0.6), kit.bs(165)))
         sl.setFixedHeight(sh)
-        sl.move(kit.bs(4), max(top, top + (h - top - sh) // 2))
+        sl.move(kit.bs(6), max(top, top + (h - top - sh) // 2))
         sl.raise_()
 
     def _place_bar(self):
@@ -759,7 +759,7 @@ class Widget(ModuleWidget):
         # sizeHint 只会给它最小宽度，于是那块空余永远填不满
         if bar_w:
             self._bar.resize(int(bar_w), self._bar.height())
-        self._bar.move(kit.bs(2), 4)     # 两头顶满：贴左边缘，宽度已是画布宽
+        self._bar.move(kit.bs(3), 4)     # 两头顶满：贴左边缘，宽度已是画布宽
         self._bar.raise_()
         # 滑条摆位放在最后：它要让到工具栏下面，得先知道工具栏最终多高
         self._place_side_slider()

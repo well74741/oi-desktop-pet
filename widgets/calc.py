@@ -12,7 +12,7 @@ from widgets import ModuleWidget, kit
 class Widget(ModuleWidget):
     """计算器：数字/运算符输入，= 求值，C 清空。"""
 
-    FIX_H = 210
+    FIX_H = 315
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -21,14 +21,14 @@ class Widget(ModuleWidget):
         self._display = QLineEdit(self)
         self._display.setReadOnly(True)
         self._display.setAlignment(Qt.AlignRight)
-        self._display.setFixedHeight(kit.bs(28))
+        self._display.setFixedHeight(kit.bs(42))
         self._display.setStyleSheet(kit.scale_qss(
-            "QLineEdit{background:rgba(255,255,255,22);border:1px solid "
-            "rgba(255,255,255,45);border-radius:4px;color:#e8ecf5;"
-            "font-family:Microsoft YaHei;font-size:14px;padding:2px 6px;}"))
+            "QLineEdit{background:rgba(255,255,255,22);border:1.5px solid "
+            "rgba(255,255,255,45);border-radius:6px;color:#e8ecf5;"
+            "font-family:Microsoft YaHei;font-size:21px;padding:3px 9px;}"))
 
         grid = QGridLayout()
-        grid.setSpacing(kit.bs(2))
+        grid.setSpacing(kit.bs(3))
         keys = [
             ("7", 0, 0), ("8", 0, 1), ("9", 0, 2), ("÷", 0, 3),
             ("4", 1, 0), ("5", 1, 1), ("6", 1, 2), ("×", 1, 3),
@@ -45,7 +45,7 @@ class Widget(ModuleWidget):
             self._btns[text] = b
 
         lay = kit.col(self._display, grid,
-                      spacing=3, margins=(4, 2, 4, 3))
+                      spacing=4.5, margins=(6, 3, 6, 4.5))
         self.setLayout(lay)
 
     def _press(self, t):

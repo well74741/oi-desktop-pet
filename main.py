@@ -53,7 +53,7 @@ def _apply_app_font(app):
         # 装了非中文系统时雅黑可能缺席，留一条回退链
         f.setFamilies(["Microsoft YaHei", "Microsoft YaHei UI", "Segoe UI",
                        "SimHei", "sans-serif"])
-        f.setPointSizeF(9.0)
+        f.setPointSizeF(14)
         app.setFont(f)
     except Exception:
         pass
@@ -228,9 +228,9 @@ class DesktopPetApp:
                 # 所有窗口才都继承得到——气泡里的模块行以前没人给它样式，吃的是
                 # 系统调色板那块黄底，同一个气泡能弹出两种长相的提示。
                 kit.TOOLTIP_QSS +
-                "QMessageBox{font-size:11px;} QMessageBox QLabel{font-size:11px;}"
-                "QInputDialog{font-size:11px;} QInputDialog QLabel{font-size:11px;}"
-                "QInputDialog QLineEdit,QInputDialog QPlainTextEdit{font-size:11px;}"
+                "QMessageBox{font-size:16px;} QMessageBox QLabel{font-size:16px;}"
+                "QInputDialog{font-size:16px;} QInputDialog QLabel{font-size:16px;}"
+                "QInputDialog QLineEdit,QInputDialog QPlainTextEdit{font-size:16px;}"
                 "QMessageBox QPushButton,QInputDialog QPushButton{%s}" % _btn)
         except Exception:
             pass
@@ -241,10 +241,10 @@ class DesktopPetApp:
             self.app.setWindowIcon(QIcon(app_icon_path))
         self.app.setQuitOnLastWindowClosed(False)
         _apply_system_theme(self.app)
-        # 普通窗口（设置窗/对话框/弹窗）按界面基准倍率统一放大（1 倍渲染，文字清晰）
+        # 应用默认字体（没指定字号的控件：托盘菜单/提示框/标准弹窗）
         try:
             from widgets import kit as _kz
-            _kz.install_ui_zoom(self.app)
+            _kz.install_app_font(self.app)
         except Exception:
             pass
 

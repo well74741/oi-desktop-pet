@@ -17,15 +17,15 @@ from widgets import ModuleWidget, kit
 class Widget(ModuleWidget):
     """待办清单：添加 / 删除选中 / 清空 / 收起，回车快速添加。"""
 
-    FIX_H = 172
-    _COLLAPSED_H = 30
+    FIX_H = 258
+    _COLLAPSED_H = 45
 
     _QSS = (
-        "QLineEdit{background:rgba(255,255,255,26);border:1px solid rgba(255,255,255,55);"
-        "border-radius:4px;color:#e8ecf5;font-family:Microsoft YaHei;font-size:10px;padding:2px 6px;}"
-        "QListWidget{background:rgba(255,255,255,18);border:1px solid rgba(255,255,255,45);"
-        "border-radius:4px;color:#e8ecf5;font-family:Microsoft YaHei;font-size:10px;}"
-        "QListWidget::item{padding:2px 4px;color:#e8ecf5;}"
+        "QLineEdit{background:rgba(255,255,255,26);border:1.5px solid rgba(255,255,255,55);"
+        "border-radius:6px;color:#e8ecf5;font-family:Microsoft YaHei;font-size:15px;padding:3px 9px;}"
+        "QListWidget{background:rgba(255,255,255,18);border:1.5px solid rgba(255,255,255,45);"
+        "border-radius:6px;color:#e8ecf5;font-family:Microsoft YaHei;font-size:15px;}"
+        "QListWidget::item{padding:3px 6px;color:#e8ecf5;}"
         "QListWidget::item:hover{background:rgba(255,255,255,30);color:#ffffff;}"
         "QListWidget::item:selected{background:rgba(74,144,226,120);color:#ffffff;}"
     )
@@ -38,14 +38,14 @@ class Widget(ModuleWidget):
         self.setStyleSheet(self.styleSheet() + "\n" + kit.action_qss(False))
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, kit.bs(4))   # 底部留白，按钮不贴模块边框
-        lay.setSpacing(kit.bs(4))
+        lay.setContentsMargins(0, 0, 0, kit.bs(6))   # 底部留白，按钮不贴模块边框
+        lay.setSpacing(kit.bs(6))
 
         self._row1 = QHBoxLayout()
-        self._row1.setSpacing(kit.bs(4))
+        self._row1.setSpacing(kit.bs(6))
         self._input = QLineEdit(self)
         self._input.setPlaceholderText("输入任务，回车添加")
-        self._input.setFont(kit.font_pt(9))
+        self._input.setFont(kit.font_pt(13.5))
         self._input.returnPressed.connect(self._add)
         self._row1.addWidget(self._input, 1)
         self._add_btn = QPushButton("添加", self)
@@ -54,11 +54,11 @@ class Widget(ModuleWidget):
         lay.addLayout(self._row1)
 
         self._list = QListWidget(self)
-        self._list.setFont(kit.font_pt(9))
+        self._list.setFont(kit.font_pt(13.5))
         lay.addWidget(self._list, 1)
 
         row2 = QHBoxLayout()
-        row2.setSpacing(kit.bs(4))
+        row2.setSpacing(kit.bs(6))
         self._del_btn = QPushButton("删除选中", self)
         self._del_btn.clicked.connect(self._del)
         row2.addWidget(self._del_btn, 0, Qt.AlignVCenter)

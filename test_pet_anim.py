@@ -297,7 +297,10 @@ for tag, sc in (("空盘", []), ("有按钮", SC)):
 
 # 提示文字排版：屏内 / 不被桌宠压住 / 不超出盘沿，放不下就竖排
 _f = QFont("Microsoft YaHei")
-_f.setPointSizeF(9 * G._kit.pet_k())
+# 字号要和真实绘制一致（pet_gravity 里是 13.5 * pet_k()）：13.5 = 旧版的 9 × 1.5，
+# v0.9.42 把那一次 1.5 烘进了源码。这里若还写 9，量出来的字比实际小一圈，
+# "窄带里放不下就竖排"这条根本触发不了。
+_f.setPointSizeF(13.5 * G._kit.pet_k())
 _fm = QFontMetrics(_f)
 scr = G._virtual_geo()
 SPOTS = [("居中", scr.center().x(), scr.center().y()),

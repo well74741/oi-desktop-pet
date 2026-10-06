@@ -27,36 +27,36 @@ from PyQt5.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFormLayout,
 import module_templates as mt
 from widgets import kit as _kit
 
-LIST_W = 128      # 左侧模板列表宽
-RIGHT_W = 330     # 右侧表单宽
-ADD_MIN_H = 380   # 添加时的最小高度（列表太矮要来回滚）
+LIST_W = 192      # 左侧模板列表宽
+RIGHT_W = 495     # 右侧表单宽
+ADD_MIN_H = 570   # 添加时的最小高度（列表太矮要来回滚）
 
 _QSS = """
-QLabel#h1{color:#eef2f8;font-size:15px;font-weight:bold;}
-QLabel#desc{color:#8f9bb0;font-size:11px;}
-QLabel#flab{color:#aab3c5;font-size:12px;}
-QLabel#cap{color:#6f7b90;font-size:11px;}
-QLabel#ok{color:#5fbf7f;font-size:11px;}
-QLabel#bad{color:#f0a35e;font-size:11px;}
-QLabel#pv_t{color:#8f9bb0;font-size:12px;}
-QLabel#pv_v{color:#eef2f8;font-size:13px;}
+QLabel#h1{color:#eef2f8;font-size:22px;font-weight:bold;}
+QLabel#desc{color:#8f9bb0;font-size:16px;}
+QLabel#flab{color:#aab3c5;font-size:18px;}
+QLabel#cap{color:#6f7b90;font-size:16px;}
+QLabel#ok{color:#5fbf7f;font-size:16px;}
+QLabel#bad{color:#f0a35e;font-size:16px;}
+QLabel#pv_t{color:#8f9bb0;font-size:18px;}
+QLabel#pv_v{color:#eef2f8;font-size:20px;}
 QLineEdit,QComboBox,QPlainTextEdit,QSpinBox{background:#161b25;color:#dfe6f2;
-  border:1px solid #39414f;border-radius:5px;padding:3px 6px;font-size:12px;
+  border:2px solid #39414f;border-radius:8px;padding:4px 9px;font-size:18px;
   font-family:'Microsoft YaHei';}
 QLineEdit:disabled,QComboBox:disabled,QPlainTextEdit:disabled{color:#6f7b90;}
-QPlainTextEdit#code{font-family:Consolas,'Microsoft YaHei';font-size:12px;}
-QPushButton#seg{min-width:0;background:#1b212c;color:#aab3c5;border:1px solid #39414f;
-  border-radius:0px;padding:3px 10px;font-size:12px;}
+QPlainTextEdit#code{font-family:Consolas,'Microsoft YaHei';font-size:18px;}
+QPushButton#seg{min-width:0;background:#1b212c;color:#aab3c5;border:2px solid #39414f;
+  border-radius:0px;padding:4px 15px;font-size:18px;}
 QPushButton#seg:checked{background:#2c4a73;color:#ffffff;border-color:#4a90e2;}
 QPushButton#seg:disabled{color:#5a6475;}
 QPushButton#link{min-width:0;background:transparent;border:none;color:#4a90e2;
-  padding:0px;font-size:12px;text-align:left;}
+  padding:0px;font-size:18px;text-align:left;}
 QPushButton#link:hover{color:#7ab0f0;}
-QListWidget#tpl{background:#171c26;border:1px solid #2c3442;border-radius:8px;
-  outline:none;padding:3px;font-family:'Microsoft YaHei';font-size:12px;}
-QListWidget#tpl::item{color:#c7d0e0;padding:3px 6px;border-radius:4px;}
+QListWidget#tpl{background:#171c26;border:2px solid #2c3442;border-radius:12px;
+  outline:none;padding:4px;font-family:'Microsoft YaHei';font-size:18px;}
+QListWidget#tpl::item{color:#c7d0e0;padding:4px 9px;border-radius:6px;}
 QListWidget#tpl::item:selected{background:#2c4a73;color:#ffffff;}
-QFrame#preview{background:#141922;border:1px solid #2c3442;border-radius:8px;}
+QFrame#preview{background:#141922;border:2px solid #2c3442;border-radius:12px;}
 """
 
 
@@ -100,8 +100,8 @@ class ModuleEditor(_kit.DarkDialog):
         self._tick = QTimer(self, interval=1000, timeout=self._run_preview)
 
         root = QHBoxLayout(self.body)
-        root.setContentsMargins(10, 10, 12, 10)
-        root.setSpacing(10)
+        root.setContentsMargins(15, 15, 18, 15)
+        root.setSpacing(15)
         self.tpl_list = None
         if add:
             self.tpl_list = self._make_list()
@@ -111,13 +111,13 @@ class ModuleEditor(_kit.DarkDialog):
         right.setFixedWidth(RIGHT_W)
         v = QVBoxLayout(right)
         v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(6)
+        v.setSpacing(9)
         self.h1 = _lab("", "h1")
         self.desc = _lab("", "desc", wrap=True)
         v.addWidget(self.h1)
         v.addWidget(self.desc)
         self._form_host = QVBoxLayout()
-        self._form_host.setContentsMargins(0, 2, 0, 0)
+        self._form_host.setContentsMargins(0, 3, 0, 0)
         v.addLayout(self._form_host)
         v.addWidget(self._make_preview())
         self.adv_btn = QPushButton()
@@ -128,12 +128,13 @@ class ModuleEditor(_kit.DarkDialog):
         self.json_edit = QPlainTextEdit()
         self.json_edit.setObjectName("code")
         self.json_edit.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.json_edit.setMinimumHeight(150)
+        self.json_edit.setMinimumHeight(225)
         self.json_edit.textChanged.connect(self._on_json_edited)
         self.json_edit.hide()
         v.addWidget(self.json_edit)
         jrow = QHBoxLayout()
         jrow.setContentsMargins(0, 0, 0, 0)
+        jrow.setSpacing(9)      # 旧版没显式设间距，被整树放大从 6 抬到 9，这里写死结果
         self.json_note = _lab("", "bad", wrap=True)
         self.json_undo = QPushButton("撤销 JSON 修改")
         self.json_undo.setObjectName("link")
@@ -198,8 +199,8 @@ class ModuleEditor(_kit.DarkDialog):
         fr = QFrame()
         fr.setObjectName("preview")
         v = QVBoxLayout(fr)
-        v.setContentsMargins(10, 6, 10, 6)
-        v.setSpacing(2)
+        v.setContentsMargins(15, 9, 15, 9)
+        v.setSpacing(3)
         top = QHBoxLayout()
         top.addWidget(_lab("预览 · 气泡里会显示成这样", "cap"), 1)
         self.pv_run = QPushButton("试一下")
@@ -211,7 +212,7 @@ class ModuleEditor(_kit.DarkDialog):
         self.pv_title = _lab("", "pv_t")
         self.pv_value = _lab("—", "pv_v", wrap=True)
         row.addWidget(self.pv_title, 0, Qt.AlignTop)
-        row.addSpacing(8)
+        row.addSpacing(12)
         row.addWidget(self.pv_value, 1)
         v.addLayout(row)
         self.pv_status = _lab("", "ok", wrap=True)
@@ -256,9 +257,9 @@ class ModuleEditor(_kit.DarkDialog):
                 if p.kind == "code":
                     w.setObjectName("code")
                     w.setLineWrapMode(QPlainTextEdit.NoWrap)
-                    w.setFixedHeight(120)
+                    w.setFixedHeight(180)
                 else:
-                    w.setFixedHeight(64)
+                    w.setFixedHeight(96)
                 w.textChanged.connect(self._changed)
             else:
                 w = QLineEdit(str(val))
@@ -270,6 +271,7 @@ class ModuleEditor(_kit.DarkDialog):
         if t.key == "ai":
             mrow = QHBoxLayout()
             mrow.setContentsMargins(0, 0, 0, 0)
+            mrow.setSpacing(9)  # 同 jrow：旧版靠整树放大把默认 6 抬成 9
             self.ai_lab = _lab("")
             go = QPushButton("AI 设置…")
             go.setObjectName("link")
@@ -316,13 +318,13 @@ class ModuleEditor(_kit.DarkDialog):
                 b.setAutoDefault(False)
                 grp.addButton(b)
                 h.addWidget(b)
-            emb.setStyleSheet("border-top-left-radius:5px;border-bottom-left-radius:5px;")
+            emb.setStyleSheet("border-top-left-radius:8px;border-bottom-left-radius:8px;")
             self.pop_btn.setStyleSheet(
-                "border-top-right-radius:5px;border-bottom-right-radius:5px;")
+                "border-top-right-radius:8px;border-bottom-right-radius:8px;")
             popup = bool(orig.get("popup")) and not (orig.get("embed", False)
                                                      and orig.get("builtin") != "mood")
             (self.pop_btn if popup else emb).setChecked(True)
-            h.addSpacing(10)
+            h.addSpacing(15)
             self.dur_lab = _lab("停留")
             self.dur_spin = QSpinBox()
             self.dur_spin.setRange(1, 600)
@@ -330,14 +332,17 @@ class ModuleEditor(_kit.DarkDialog):
             self.dur_spin.setValue(int(orig.get("popup_duration", 3) or 3))   # 运行时默认 3 秒
             self.dur_spin.valueChanged.connect(self._changed)
             h.addWidget(self.dur_lab)
-            h.addSpacing(4)
+            h.addSpacing(6)
             h.addWidget(self.dur_spin)
             h.addStretch(1)
             self.pop_btn.toggled.connect(self._on_display)
             f.addRow(_lab("显示"), seg)
         self._form = f
-        box.ensurePolished()
+        # 先挂进布局再 ensurePolished：控件还没挂上去时解析不到祖先窗口的样式表，
+        # 之后再挂也不会重新解析（已 polished），QSS 的字号就不会生效。
         self._form_host.addWidget(box)
+        box.ensurePolished()
+        _kit.restyle(self)
         self._sync_display_rows()
 
     # ------------------------------------------------------------ 切换 / 载入
@@ -677,7 +682,14 @@ class ModuleEditor(_kit.DarkDialog):
         self.setFixedSize(w, h)
 
     def showEvent(self, event):
-        self._fit()                 # polish（界面缩放）之后再按真实尺寸定一次
+        # 必须**先**把样式表重新下发一次、再量尺寸：右侧表单里的控件都是样式表设好
+        # 之后才建的，没重新解析时字号还停在应用默认值，照那个量出来的窗口会矮一截
+        # （编辑态少 61px；添加态被 ADD_MIN_H 夹住才看不出来）。
+        # DarkDialog.showEvent 里认 oiRestyled 这个标志，它那一次会自动跳过。
+        if not self.property("oiRestyled"):
+            self.setProperty("oiRestyled", True)
+            _kit.restyle(self)
+        self._fit()                 # 样式生效之后再按真实尺寸定一次
         super().showEvent(event)
         if self._tpl is not None and self._tpl.preview == "auto":
             self._run_preview()
@@ -696,11 +708,11 @@ def ask_save(parent, name):
     import pet_gravity as G
     G._apply_dark_style(d)
     v = QVBoxLayout(d.body)
-    v.setContentsMargins(14, 12, 14, 12)
-    v.setSpacing(10)
+    v.setContentsMargins(21, 18, 21, 18)
+    v.setSpacing(15)
     lb = QLabel("「%s」改了还没保存，要先保存吗？" % name)
     lb.setWordWrap(True)
-    lb.setStyleSheet("color:#dfe6f2;font-size:12px;")
+    lb.setStyleSheet("color:#dfe6f2;font-size:18px;")
     v.addWidget(lb)
     row = QHBoxLayout()
     row.addStretch(1)
@@ -716,7 +728,7 @@ def ask_save(parent, name):
         b.clicked.connect(lambda _=False, k=key: (out.__setitem__(0, k), d.accept()))
         row.addWidget(b)
     v.addLayout(row)
-    d.setFixedWidth(300)
+    d.setFixedWidth(450)
     _kit.place_near(d, parent)
     d.exec_()
     return out[0]

@@ -359,7 +359,7 @@ try:
         pump()
         btns = [b for b in u.findChildren(QPushButton) if b.isVisible() and b.text()]
         check("检查更新窗口不再巨大（以前 380 被放大两次，实际 855 宽）",
-              u.width() <= kit.ui(360), "宽 %d" % u.width())
+              u.width() <= 540, "宽 %d" % u.width())
         check("检查更新窗口的按钮和设置窗一样大",
               btns and all(b.font().pixelSize() == ref_px for b in btns),
               str([(b.text(), b.font().pixelSize()) for b in btns]))
@@ -453,7 +453,7 @@ try:
           "%d vs %d" % (second.width(), kit.bubble_widget_width()))
     check("换测一个模块，上一个组件当场撤掉（以前叠在一起）",
           first.isHidden() and first.parent() is None)
-    sd.rules_result_view.setFixedSize(kit.ui(150), kit.ui(60))
+    sd.rules_result_view.setFixedSize(225, 90)
     pump()
     check("测试区比组件小 -> 出滚动条，不硬压",
           sd.rules_result_view.host.horizontalScrollBar().maximum() > 0

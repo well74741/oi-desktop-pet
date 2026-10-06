@@ -26,7 +26,7 @@ for name in NAMES:
         if w is None:
             fails.append("%s: %s" % (name, err))
             continue
-        w.setFixedWidth(kit.bs(210))
+        w.setFixedWidth(kit.bs(315))
         # 模拟展开：调用各模块的展开入口（_toggle_fold / expand）
         fold = getattr(w, "_toggle_fold", None)
         if fold is not None:
@@ -47,8 +47,8 @@ for name in NAMES:
         min_h = max(30, kit.bs(int(getattr(w, "FIX_H", 0) or 0)))
         if cur is None or int(cur) < min_h:
             fails.append("%s: current_height=%s < %s" % (name, cur, min_h))
-        if w.width() != kit.bs(210):
-            fails.append("%s: width=%s != %s" % (name, w.width(), kit.bs(210)))
+        if w.width() != kit.bs(315):
+            fails.append("%s: width=%s != %s" % (name, w.width(), kit.bs(315)))
         # 触发一次布局
         w.adjustSize()
         w.show()

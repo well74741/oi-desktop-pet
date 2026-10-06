@@ -14,13 +14,13 @@ from widgets import ModuleWidget, kit
 class Widget(ModuleWidget):
     """计数组件：点击 +1，右键/清零按钮归零。"""
 
-    FIX_H = 78
+    FIX_H = 117
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._count = 0
 
-        self._label = kit.lab("0", size=16, bold=True,
+        self._label = kit.lab("0", size=24, bold=True,
                               align=Qt.AlignCenter, wrap=False)
         btn = kit.btn("＋1", primary=True)
         btn.setCursor(Qt.PointingHandCursor)
@@ -32,7 +32,7 @@ class Widget(ModuleWidget):
         lay = kit.col(
             kit.row(btn, reset),
             self._label,
-            spacing=3, margins=(0, 4, 0, 5))   # 横向边距由模块卡片统一控制
+            spacing=4.5, margins=(0, 6, 0, 7.5))   # 横向边距由模块卡片统一控制
         self.setLayout(lay)
         self._load()
 

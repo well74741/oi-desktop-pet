@@ -38,3 +38,19 @@ mytemplate_data.json
 # 以后新增模块的数据文件也一并排除，不用逐个补
 *_data.json
 snapshots/
+
+# ---- 一次性工具脚本（改完即弃，别当成能反复跑的工具）----
+# 这几个烘焙器已经应用完毕，再跑一次会把数值二次放大（乘 1.5 再乘 1.5）
+_bake_1p5.py
+_bake_all.py
+_bake_defs.py
+_bake_final.py
+_finish_scale.py
+
+# 启发式脚本，曾把源码改坏（删错右括号），别用也别留在库里误导人
+_fix_parens.py
+
+# 临时诊断，已被 _diag_layouts.py 覆盖
+_diag_bubble.py
+_diag_spacing.py
+_diag_update.py

@@ -26,12 +26,12 @@ _DEFAULTS = [
 class Widget(ModuleWidget):
     """快捷启动器：点击按钮打开对应程序/网址/文件。"""
 
-    FIX_H = 66
+    FIX_H = 99
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._items = []
-        self._lay = kit.col(spacing=2, margins=(4, 3, 4, 3))
+        self._lay = kit.col(spacing=3, margins=(6, 4.5, 6, 4.5))
         self.setLayout(self._lay)
         self._load()
         self._rebuild()
@@ -55,7 +55,7 @@ class Widget(ModuleWidget):
             if w is not None:
                 w.setParent(None)
         # 两行布局
-        row = kit.row(spacing=4)
+        row = kit.row(spacing=6)
         for i, it in enumerate(self._items):
             label = str(it.get("label", "?"))
             b = kit.btn(label, small=True)
@@ -65,7 +65,7 @@ class Widget(ModuleWidget):
             row.addWidget(b)
             if (i + 1) % 4 == 0:
                 self._lay.addLayout(row)
-                row = kit.row(spacing=4)
+                row = kit.row(spacing=6)
         if row.count():
             row.addStretch(1)
             self._lay.addLayout(row)

@@ -93,8 +93,8 @@ for sc in SCALES:
             ("失败", "获取失败", {"kind": "error", "error": "HTTP Error 503"}),
             ("加载", "", {"kind": "loading"})):
         row = BL._LTextRow()
-        row.set_content("内存", value, kit.bs(150), state=state)
-        h = host_row(row, kit.bs(210))
+        row.set_content("内存", value, kit.bs(225), state=state)
+        h = host_row(row, kit.bs(315))
         ov, who = deep_overflow(row)
         check("文字行·%s(%s)：内容不出框" % (label, tag), ov <= 0,
               "超出 %dpx（%s）" % (ov, who))
@@ -106,7 +106,7 @@ for sc in SCALES:
     # ---------- 按钮行 ----------
     brow = BL._LBtnRow()
     brow.set_content("聚合AI")
-    h = host_row(brow, kit.bs(210))
+    h = host_row(brow, kit.bs(315))
     ov, who = deep_overflow(brow)
     check("按钮行(%s)：内容不出框" % tag, ov <= 0, "超出 %dpx（%s）" % (ov, who))
     check("按钮行(%s)：标题与按钮同一条中线" % tag,
@@ -127,10 +127,10 @@ for sc in SCALES:
         # 高度按**气泡自己那套预算**来设（照抄 _relayout 的算法），这才是线上
         # 真正生效的值；行本身没有固定高度，单独 new 出来量是 0，不代表 bug
         wh = (w.current_height() if hasattr(w, "current_height")
-              else BL._widget_height(w, kit.bs(210) - 24))
-        row.setFixedWidth(kit.bs(210) - 2 * (BL_OUT_M + BL_HANDLE_W))
+              else BL._widget_height(w, kit.bs(315) - 24))
+        row.setFixedWidth(kit.bs(315) - 2 * (BL_OUT_M + BL_HANDLE_W))
         row.setFixedHeight(max(10, int(wh)) + row.title_extra())
-        h = host_row(row, kit.bs(210))
+        h = host_row(row, kit.bs(315))
         ov, who = deep_overflow(row)
         if ov > 0:
             bad_fit.append("%s 超出 %dpx(%s)" % (name, ov, who))
@@ -159,7 +159,7 @@ for sc in SCALES:
     _l.setContentsMargins(0, 0, 0, 0)
     _l.addWidget(_long)
     _l.addWidget(_short)
-    _h.resize(kit.bs(210), kit.row_height() * 2 + 8)
+    _h.resize(kit.bs(315), kit.row_height() * 2 + 8)
     _h.show()
     app.processEvents()
     _hosts.append(_h)
@@ -262,7 +262,7 @@ else:
                      _cv._bar.x(), _cv._bar.width(), _sl.y()))
     check("画布工具栏：两头顶满画布宽度（剩余边距 %s px）"
           % ([o[0] - (o[5] + o[6]) for o in _obs],),
-          all(0 <= o[0] - (o[5] + o[6]) <= kit.bs(6) for o in _obs))
+          all(0 <= o[0] - (o[5] + o[6]) <= kit.bs(9) for o in _obs))
     check("画布工具栏：按钮宽度随画布拉伸（%s），且都不瘦过拼豆那颗（%d px）"
           % ([o[1] for o in _obs], _min_w),
           _obs[-1][1] > _obs[0][1] and all(o[1] >= _min_w for o in _obs))
@@ -319,7 +319,7 @@ check("弹窗：落在操作区附近（离锚点不超过半个屏幕）",
       all(c[2] <= (_av.width() + _av.height()) // 2 for c in _dlg_cases),
       "%s" % ([(c[0], c[2]) for c in _dlg_cases],))
 _anchor.deleteLater()
-check("弹窗：摆位在 showEvent 里做（构造时还没按 UI_BASE 放大，尺寸是旧的）",
+check("弹窗：摆位在 showEvent 里做（构造时样式表还没重新下发，量到的尺寸是旧的）",
       "def showEvent" in open(
           os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "widgets", "kit.py"), encoding="utf-8").read())
@@ -329,7 +329,7 @@ check("弹窗：摆位在 showEvent 里做（构造时还没按 UI_BASE 放大�
 # 那正是 v0.9.10 "文字偏低出框" 的根因。
 for sc in SCALES:
     kit.set_bubble_scale(sc)
-    need = BL._font_h() + 2 * kit.bs(1)
+    need = BL._font_h() + 2 * kit.bs(1.5)
     check("行高公式(x%s)：容得下一行字 + 卡片内边距（%d <= %d）"
           % (sc, need, kit.row_height()), need <= kit.row_height())
 kit.set_bubble_scale(1.0)

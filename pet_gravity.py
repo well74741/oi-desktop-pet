@@ -414,7 +414,7 @@ _HINT_ANGLES = _hint_angle_order()
 
 
 # ==================== 常量 ====================
-EDGE_SNAP_THRESHOLD = 5  # 吸附判定距离（标准档像素，按窗口外框到屏幕边计算）
+EDGE_SNAP_THRESHOLD = 8  # 吸附判定距离（最终像素，按窗口外框到屏幕边计算）
 # 帧循环调速：交互/动画期间 60fps，纯呼吸待机 30fps（呼吸相邻帧只动 0.2px，
 # 60fps 里有一半的重绘画出来是同一张图）。隐藏期间降到 5fps 只做"是否该现身"的轮询。
 FRAME_MS_BUSY = 16
@@ -440,20 +440,20 @@ ELASTIC_AMPLITUDE = 0.18
 ELASTIC_CYCLES = 1.5
 ELASTIC_DECAY = 1.2
 DISK_ANIM_DELAY = 0.05  # 背景盘展开/收回比首/末按钮慢 0.05s（提前 50%）
-PET_SHADOW_MARGIN = int(round(8 * _kit.UI_BASE))   # 桌宠窗口四周留白，容纳阴影与放大过冲
+PET_SHADOW_MARGIN = 12   # 桌宠窗口四周留白，容纳阴影与放大过冲（最终像素）
 MENU_QSS = """
-    QMenu{background:#232a3a;border:1px solid #4a5468;border-radius:6px;padding:2px;
-           font-family:"Microsoft YaHei";font-size:11px;color:#d5dbe8}
-    QMenu::item{padding:4px 14px;border-radius:3px;margin:0 1px}
+    QMenu{background:#232a3a;border:1.5px solid #4a5468;border-radius:9px;padding:3px;
+           font-family:"Microsoft YaHei";font-size:16.5px;color:#d5dbe8}
+    QMenu::item{padding:6px 21px;border-radius:4.5px;margin:0 1.5px}
     QMenu::item:selected{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4a90e2,stop:1 #2fb8c0);color:#ffffff}
-    QMenu::separator{height:1px;background:#39414f;margin:2px 6px}
+    QMenu::separator{height:1.5px;background:#39414f;margin:3px 9px}
 """
 
 class StyledMenu(QWidget):
     """自定义圆角弹出菜单，用 QPainter 画圆角白色背景板，无原生黑色边框。"""
     _qss_item = (
-        "QPushButton{text-align:left;padding:6px 18px;border:none;background:transparent;"
-        "font-family:'Microsoft YaHei';font-size:11px;color:#d5dbe8;border-radius:6px}"
+        "QPushButton{text-align:left;padding:9px 27px;border:none;background:transparent;"
+        "font-family:'Microsoft YaHei';font-size:16px;color:#d5dbe8;border-radius:9px}"
         "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
         "stop:0 #4a90e2,stop:1 #2fb8c0);color:#ffffff}"
         "QPushButton:pressed{background:#3a80d0;color:#ffffff}"
@@ -467,8 +467,8 @@ class StyledMenu(QWidget):
         self._result = None
         self._loop = None
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(1)
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(2)
         self._btn_layout = layout
 
     def addAction(self, text):
@@ -481,8 +481,8 @@ class StyledMenu(QWidget):
 
     def addSeparator(self):
         sep = QWidget(self)
-        sep.setFixedHeight(1)
-        sep.setStyleSheet("background:#39414f;margin:2px 6px")
+        sep.setFixedHeight(2)
+        sep.setStyleSheet("background:#39414f;margin:3px 9px")
         self._btn_layout.addWidget(sep)
 
     def _on_click(self, text):
@@ -716,7 +716,11 @@ def get_config_path():
 
 def load_settings() -> dict:
     path = get_config_path()
-    defaults = {"pet_image": "", "pet_size": 75, "pet_opacity": 1.0, "button_size": 25,
+    defaults = {"pet_image": "", "pet_size": 112.5, "pet_opacity": 1.0,
+                "button_size": 37.5,
+                # 这两项存的是**最终像素**。v0.9.42 之前存"乘 1.5 之前"的值（75/25），
+                # 下面 ui_px_baked 负责一次性迁移，不会重复放大。
+                "ui_px_baked": False,
                 "slot_shortcuts": [], "show_tooltips": True, "status_enabled": {},
                 "status_custom_items": [], "status_rules": [], "hidden_builtins": [],
                 "bubble_scale": 1.0, "pet_scale": 1.0,
@@ -752,6 +756,22 @@ def load_settings() -> dict:
                 _error_log("pet_settings.json 与 .bak 均无法读取，本次使用默认设置")
         if isinstance(saved, dict):
             defaults.update({k: v for k, v in saved.items() if k in defaults})
+            if not saved.get("ui_px_baked"):
+                # 一次性迁移：旧配置里存的是"未乘 1.5"的逻辑值（75 / 25），
+                # 旧版在运行时才乘；现在源码里的数就是最终像素，所以补乘一次。
+                # 消费端是 int() 截断，所以这里**保留 .5**，否则桌宠会差 1px。
+                #
+                # 只迁移**文件里真有**的键：文件存在但缺这一项时，defaults 里放的
+                # 已经是烘焙后的最终值（112.5 / 37.5），再乘一次就成了 168，
+                # 桌宠凭空大一圈。（老配置一定带 pet_size，所以不影响正常升级。）
+                for _k in ("pet_size", "button_size"):
+                    if _k not in saved:
+                        continue
+                    try:
+                        defaults[_k] = float(saved.get(_k) or 0) * 1.5
+                    except (TypeError, ValueError):
+                        pass
+    defaults["ui_px_baked"] = True    # 迁移只做一次
     # 插槽最多保留 8 个：防止旧数据中隐藏的第 9+ 项在删除按钮时"补位"
     defaults["slot_shortcuts"] = defaults.get("slot_shortcuts", [])[:8]
     # 内置规则合并进规则列表（缺失时补入；已存在则保持用户排序）
@@ -980,7 +1000,7 @@ def _error_log(msg):
 # ==================== 名称提示标签 ====================
 class _TipLabel(QWidget):
     _font = QFont("Microsoft YaHei")
-    _font.setPointSizeF(8 * _kit.UI_BASE)   # 类属性：按界面基准倍率
+    _font.setPointSizeF(12.0)   # 类属性：最终字号
 
     def __init__(self):
         super().__init__(None)
@@ -1102,13 +1122,13 @@ class _WebpAnim(QObject):
 class ConfirmPopup(QWidget):
     """拖入添加/替换的确认弹窗：出现在鼠标附近，风格与菜单统一。"""
     _qss = (
-        "QWidget{background:#232a3a;border:1px solid #4a5468;border-radius:8px}"
-        "QLabel{color:#d5dbe8;font-family:'Microsoft YaHei';font-size:11px}"
-        "QPushButton{font-family:'Microsoft YaHei';font-size:11px;color:#ffffff;"
+        "QWidget{background:#232a3a;border:2px solid #4a5468;border-radius:12px}"
+        "QLabel{color:#d5dbe8;font-family:'Microsoft YaHei';font-size:16px}"
+        "QPushButton{font-family:'Microsoft YaHei';font-size:16px;color:#ffffff;"
         "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4aa3ff,stop:1 #2fb8c0);"
-        "border:none;border-radius:5px;padding:5px 14px;min-width:56px}"
+        "border:none;border-radius:8px;padding:8px 21px;min-width:84px}"
         "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #5ab3ff,stop:1 #3fc8d0)}"
-        "QPushButton#cancel{color:#aab3c5;background:#2b3446;border:1px solid #465066}"
+        "QPushButton#cancel{color:#aab3c5;background:#2b3446;border:2px solid #465066}"
         "QPushButton#cancel:hover{background:#3a4a63;color:#ffffff}"
     )
 
@@ -1118,7 +1138,7 @@ class ConfirmPopup(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet(self._qss)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setContentsMargins(21, 18, 21, 18)
         self._label = QLabel(text)
         self._label.setWordWrap(True)
         lay.addWidget(self._label)
@@ -1187,13 +1207,13 @@ class _AddTextDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedWidth(280)
+        self.setFixedWidth(420)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(21, 18, 21, 18)
+        lay.setSpacing(12)
         t = QLabel(title)
         t.setStyleSheet(
-            "color:#e8ecf5;font-family:'Microsoft YaHei';font-size:12px;font-weight:600;"
+            "color:#e8ecf5;font-family:'Microsoft YaHei';font-size:18px;font-weight:600;"
             "background:transparent;")
         lay.addWidget(t)
 
@@ -1208,7 +1228,7 @@ class _AddTextDialog(QDialog):
         lay.addWidget(self.value_edit)
 
         self.hint = QLabel("")
-        self.hint.setStyleSheet("color:#e06c6c;font-family:'Microsoft YaHei';font-size:10px;"
+        self.hint.setStyleSheet("color:#e06c6c;font-family:'Microsoft YaHei';font-size:15px;"
                                 "background:transparent;")
         self.hint.setVisible(False)
         lay.addWidget(self.hint)
@@ -1239,23 +1259,23 @@ class _AddTextDialog(QDialog):
 
     @staticmethod
     def _edit_qss():
-        return ("QLineEdit{background:#1c2030;border:1px solid #465066;"
-                "border-radius:5px;color:#e8ecf5;font-family:'Microsoft YaHei';"
-                "font-size:11px;padding:5px 7px;}"
+        return ("QLineEdit{background:#1c2030;border:2px solid #465066;"
+                "border-radius:8px;color:#e8ecf5;font-family:'Microsoft YaHei';"
+                "font-size:16px;padding:8px 10px;}"
                 "QLineEdit:focus{border-color:#4a90e2;}")
 
     @staticmethod
     def _btn_qss(primary):
         if primary:
-            return ("QPushButton{font-family:'Microsoft YaHei';font-size:11px;color:#ffffff;"
+            return ("QPushButton{font-family:'Microsoft YaHei';font-size:16px;color:#ffffff;"
                     "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-                    "stop:0 #4aa3ff,stop:1 #2fb8c0);border:none;border-radius:5px;"
-                    "padding:5px 14px;min-width:56px}"
+                    "stop:0 #4aa3ff,stop:1 #2fb8c0);border:none;border-radius:8px;"
+                    "padding:8px 21px;min-width:84px}"
                     "QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
                     "stop:0 #5ab3ff,stop:1 #3fc8d0)}")
-        return ("QPushButton{font-family:'Microsoft YaHei';font-size:11px;color:#aab3c5;"
-                "background:#2b3446;border:1px solid #465066;border-radius:5px;"
-                "padding:5px 14px;min-width:56px}"
+        return ("QPushButton{font-family:'Microsoft YaHei';font-size:16px;color:#aab3c5;"
+                "background:#2b3446;border:2px solid #465066;border-radius:8px;"
+                "padding:8px 21px;min-width:84px}"
                 "QPushButton:hover{background:#3a4a63;color:#ffffff}")
 
     def validate(self, value):
@@ -1432,10 +1452,10 @@ class Toast(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         lab = QLabel(text)
         lab.setStyleSheet(
-            "color:#f2f4f8;font-family:'Microsoft YaHei';font-size:10px;"
-            "background:rgba(28,32,44,210);border-radius:6px;padding:6px 10px")
+            "color:#f2f4f8;font-family:'Microsoft YaHei';font-size:15px;"
+            "background:rgba(28,32,44,210);border-radius:9px;padding:9px 15px")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(1, 1, 1, 1)
+        lay.setContentsMargins(2, 2, 2, 2)
         lay.addWidget(lab)
         self.adjustSize()
         scr = QApplication.screenAt(pos) or QApplication.primaryScreen()
@@ -2966,7 +2986,7 @@ class RadialMenu(QWidget):
                 hint_a = max(0.0, min(1.0, (aa - 0.15) / 0.55))
                 if hint_a > 0.01:
                     _hf = QFont("Microsoft YaHei")
-                    _hf.setPointSizeF(9 * _kit.pet_k())
+                    _hf.setPointSizeF(13.5 * _kit.pet_k())
                     p.setFont(_hf)
                     # 排版按**最终**盘径算：否则盘子越长越大，每帧算出来的
                     # 位置和横/竖排法都在变，文字会边飞边翻。位置再按 rr
@@ -3556,7 +3576,7 @@ def _make_pixel_halo(pm):
 def _pv_font(pt, bold=False):
     """径向菜单预览里的字号：按界面基准倍率放大（预览本身不参与统一放大）。"""
     f = QFont("Microsoft YaHei")
-    f.setPointSizeF(pt * _kit.UI_BASE)
+    f.setPointSizeF(pt)
     f.setBold(bold)
     return f
 
@@ -3634,14 +3654,16 @@ class PreviewWidget(QWidget):
         self._pet_image_path = path or ""
 
     def set_pet_preview_size(self, size):
-        self._pet_size = size
+        # 取整：桌宠大小迁移后可能带 .5（见 load_settings 的 ui_px_baked），
+        # 而 QPixmap.scaled() 只收整数。int() 截断与旧的 ui() 结果一致。
+        self._pet_size = int(size)
         self._layout_dirty = True
         self._refresh_static_pm()
         self._refresh_gif_frame()
         self.update()
 
     def set_slot_size(self, s):
-        self._slot_size = s
+        self._slot_size = int(s)
         self._layout_dirty = True
         self.update()
 
@@ -3993,7 +4015,7 @@ class PreviewWidget(QWidget):
                                      icon_pm, QRectF(0, 0, sw, sh))
                 else:
                     p.setPen(QColor(80, 80, 80))
-                    p.setFont(_pv_font(11))
+                    p.setFont(_pv_font(16.5))
                     p.drawText(QRectF(-ss / 2.0, -ss / 2.0, ss, ss), Qt.AlignCenter, sc.get("name", "?")[:2])
                 p.restore()
         else:
@@ -4002,14 +4024,14 @@ class PreviewWidget(QWidget):
 
         # 底部操作说明（保持精简）
         p.setPen(QColor(150, 150, 150))
-        p.setFont(_pv_font(10))
+        p.setFont(_pv_font(15))
         if self._is_dragging and self._drag_outside and 0 <= self._drag_source < n:
             p.setPen(QColor(200, 80, 80))
-            p.setFont(_pv_font(10, True))
+            p.setFont(_pv_font(15, True))
             p.drawText(QRect(0, h - 24, w, 22), Qt.AlignCenter, "松手删除此快捷方式")
         elif self._is_dragging and self._drag_target >= 0 and self._drag_target != self._drag_source:
             p.setPen(QColor(60, 130, 90))
-            p.setFont(_pv_font(10, True))
+            p.setFont(_pv_font(15, True))
             p.drawText(QRect(0, h - 24, w, 22), Qt.AlignCenter, "松手交换到该插槽")
         elif self._is_dragging:
             p.setPen(QColor(120, 120, 120))
@@ -4017,11 +4039,11 @@ class PreviewWidget(QWidget):
         elif self._ext_drag_active:
             if self._ext_hover_pet:
                 p.setPen(QColor(60, 130, 90))
-                p.setFont(_pv_font(10, True))
+                p.setFont(_pv_font(15, True))
                 p.drawText(QRect(0, h - 24, w, 22), Qt.AlignCenter, "松手替换桌宠图片")
             elif n >= 8:
                 p.setPen(QColor(60, 130, 90))
-                p.setFont(_pv_font(10, True))
+                p.setFont(_pv_font(15, True))
                 p.drawText(QRect(0, h - 24, w, 22), Qt.AlignCenter, "松手替换该分区")
             else:
                 p.drawText(QRect(0, h - 24, w, 22), Qt.AlignCenter, "松手添加为新插槽")
@@ -4497,10 +4519,10 @@ class _RuleRow(QWidget):
     """规则列表行：名称/类型/间隔 + 右侧启用勾选框（点击行可选中，右键弹菜单）"""
 
     _MENU_QSS = (
-        "QMenu{background:#232a3a;color:#e8ecf5;border:1px solid "
-        "rgba(255,255,255,40);padding:2px;}"
-        "QMenu::item{padding:4px 16px;font-size:10px;}"
-        "QMenu::item:selected{background:rgba(74,144,226,130);border-radius:3px;}"
+        "QMenu{background:#232a3a;color:#e8ecf5;border:2px solid "
+        "rgba(255,255,255,40);padding:3px;}"
+        "QMenu::item{padding:6px 24px;font-size:15px;}"
+        "QMenu::item:selected{background:rgba(74,144,226,130);border-radius:4px;}"
         "QMenu::item:disabled{color:rgba(200,215,240,70);}"
     )
 
@@ -4510,13 +4532,13 @@ class _RuleRow(QWidget):
         self._idx = idx
         self._dlg = dlg
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(4, 0, 4, 0)
-        lay.setSpacing(4)
+        lay.setContentsMargins(6, 0, 6, 0)
+        lay.setSpacing(6)
         self.grip = _GripLabel(self)
         self.grip.setCursor(Qt.OpenHandCursor)
-        self.grip.setFixedWidth(14)
+        self.grip.setFixedWidth(21)
         self.grip.setAlignment(Qt.AlignCenter)
-        self.grip.setStyleSheet("color:#8a92a6; font-size:11px;")
+        self.grip.setStyleSheet("color:#8a92a6; font-size:16px;")
         self.grip.setToolTip("拖动排序")
         lay.addWidget(self.grip)
         st = (rule.get("source") or {}).get("type", "static")
@@ -4631,13 +4653,15 @@ _RULE_DIALOG_REF = [None]   # 弱引用：同一时间只允许一个模块编�
 
 def _apply_dark_style(dlg, extra=""):
     """所有深色对话框共用同一套样式（设置窗那套 tech QSS 的深色版）：
-    按钮/勾选框/输入框/列表/菜单外观一致，并保留 DarkDialog 的 1px 外框。
+    按钮/勾选框/输入框/列表/菜单外观一致，并保留 DarkDialog 的 2px 外框。
     extra：窗口自己的补充规则（追加在后面，优先级更高）。"""
     dlg.setObjectName("TechSettings")
     qss = SettingsDialog._tech_qss
     for old, new in SettingsDialog._DARK_SUBS:
         qss = qss.replace(old, new)
-    qss += "QDialog#TechSettings{border:1px solid #39414f;}"
+    # 2px 不是 1.5px：这是普通窗口的样式表，旧版走 ui_qss 换算成整数（1→2），
+    # Qt 对小数 px 的处理也不可靠。自缩放区（气泡）才保留 1.5px 这种精确半像素。
+    qss += "QDialog#TechSettings{border:2px solid #39414f;}"
     dlg.setStyleSheet(qss + extra)
 
 
@@ -4717,19 +4741,19 @@ class AISettingsDialog(_DarkDialog):
         super().__init__("AI 设置 · 统一大模型", parent)
         _apply_dark_style(self)
         self.settings = settings   # 直接编辑传入的 settings（接受时立即持久化）
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(690)
         prof = settings.get("ai_profile") or {}
 
         lay = QVBoxLayout(self.body)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(21, 18, 21, 18)
+        lay.setSpacing(12)
         tip = QLabel("在这里配置一次大模型接口，AI 助手对话、AI 帮你建模块、"
                      "AI 绘画等所有 AI 功能都会共用它。")
         tip.setWordWrap(True)
-        tip.setStyleSheet("color:#aab3c5; font-size:11px;")
+        tip.setStyleSheet("color:#aab3c5; font-size:16px;")
         lay.addWidget(tip)
 
-        _LBL_W = 70   # 左侧标签列统一宽度：所有输入框左边缘对齐
+        _LBL_W = 105  # 左侧标签列统一宽度：所有输入框左边缘对齐（最终像素）
 
         def _lbl(text):
             lb = QLabel(text)
@@ -4801,7 +4825,7 @@ class AISettingsDialog(_DarkDialog):
         self.fetch_btn = QPushButton("拉取模型")
         self.fetch_btn.setCursor(Qt.PointingHandCursor)
         self.fetch_btn.setToolTip("用当前接口地址与 API Key 拉取可用模型列表")
-        self.fetch_btn.setStyleSheet("min-width:0; padding:3px 10px; font-size:11px;")
+        self.fetch_btn.setStyleSheet("min-width:0; padding:4px 15px; font-size:16px;")
         self.fetch_btn.clicked.connect(self._on_fetch_models)
         row_m.addWidget(self.fetch_btn)
         lay.addLayout(row_m)
@@ -4809,7 +4833,7 @@ class AISettingsDialog(_DarkDialog):
 
         lay.addWidget(QLabel("系统提示词（人设，选填）"))
         self.sys_edit = QPlainTextEdit(str(prof.get("system_prompt", "") or _AI_DEFAULT_SYS_PROMPT))
-        self.sys_edit.setFixedHeight(56)
+        self.sys_edit.setFixedHeight(84)
         lay.addWidget(self.sys_edit)
 
         # 测试连接
@@ -4820,7 +4844,7 @@ class AISettingsDialog(_DarkDialog):
         test_row.addWidget(self.test_btn)
         self.test_lab = QLabel("")
         self.test_lab.setWordWrap(True)
-        self.test_lab.setStyleSheet("font-size:11px;")
+        self.test_lab.setStyleSheet("font-size:16px;")
         test_row.addWidget(self.test_lab, 1)
         lay.addLayout(test_row)
         self._ping_done.connect(self._on_ping_done)
@@ -4834,7 +4858,7 @@ class AISettingsDialog(_DarkDialog):
             "无论是否开启都可用。")
         lay.addWidget(self.allow_cb)
         warn = QLabel("⚠ 开启『可执行模块』有安全风险，仅在信任 AI 来源时开启。")
-        warn.setStyleSheet("color:#e6a23c; font-size:10px;")
+        warn.setStyleSheet("color:#e6a23c; font-size:15px;")
         warn.setWordWrap(True)
         lay.addWidget(warn)
 
@@ -4881,11 +4905,11 @@ class AISettingsDialog(_DarkDialog):
         base, _model, key = self._current_cfg()
         style = self.api_style.currentData() or "openai"
         if not base:
-            self.test_lab.setStyleSheet("font-size:11px; color:#f56c6c;")
+            self.test_lab.setStyleSheet("font-size:16px; color:#f56c6c;")
             self.test_lab.setText("✗ 请先填接口地址")
             return
         self.fetch_btn.setEnabled(False)
-        self.test_lab.setStyleSheet("font-size:11px; color:#aab3c5;")
+        self.test_lab.setStyleSheet("font-size:16px; color:#aab3c5;")
         self.test_lab.setText("拉取模型中…")
 
         def work():
@@ -4902,7 +4926,7 @@ class AISettingsDialog(_DarkDialog):
     def _on_models_done(self, ok, names, msg):
         self.fetch_btn.setEnabled(True)
         self.test_lab.setStyleSheet(
-            "font-size:11px; color:%s;" % ("#67c23a" if ok else "#f56c6c"))
+            "font-size:16px; color:%s;" % ("#67c23a" if ok else "#f56c6c"))
         self.test_lab.setText(("✓ " if ok else "✗ ") + msg)
         if not ok or not names:
             return
@@ -4922,7 +4946,7 @@ class AISettingsDialog(_DarkDialog):
         base, model, key = self._current_cfg()
         style = self.api_style.currentData() or "openai"
         self.test_btn.setEnabled(False)
-        self.test_lab.setStyleSheet("font-size:11px; color:#aab3c5;")
+        self.test_lab.setStyleSheet("font-size:16px; color:#aab3c5;")
         self.test_lab.setText("测试中…")
 
         def work():
@@ -4939,7 +4963,7 @@ class AISettingsDialog(_DarkDialog):
     def _on_ping_done(self, ok, msg):
         self.test_btn.setEnabled(True)
         self.test_lab.setStyleSheet(
-            "font-size:11px; color:%s;" % ("#67c23a" if ok else "#f56c6c"))
+            "font-size:16px; color:%s;" % ("#67c23a" if ok else "#f56c6c"))
         self.test_lab.setText(("✓ " if ok else "✗ ") + msg)
 
     def _on_ok(self):
@@ -4978,78 +5002,78 @@ class SettingsDialog(_DarkDialog):
 
     _tech_qss = """
         QDialog#TechSettings { background: #eef2f8; font-family: "Microsoft YaHei"; }
-        QLabel { color: #3a3f55; font-family: "Microsoft YaHei"; font-size: 11px; }
+        QLabel { color: #3a3f55; font-family: "Microsoft YaHei"; font-size: 16px; }
         QGroupBox {
-            border: 1px solid #d8dde8; border-radius: 8px; margin-top: 12px;
-            background: #ffffff; padding: 6px 6px 6px 6px;
-            font-family: "Microsoft YaHei"; font-size: 11px; color: #5a6178;
+            border: 2px solid #d8dde8; border-radius: 12px; margin-top: 18px;
+            background: #ffffff; padding: 9px 9px 9px 9px;
+            font-family: "Microsoft YaHei"; font-size: 16px; color: #5a6178;
         }
         QGroupBox::title {
-            subcontrol-origin: margin; left: 12px; padding: 0 6px;
-            color: #4a7fc8; font-weight: 600; font-size: 11px;
+            subcontrol-origin: margin; left: 18px; padding: 0 9px;
+            color: #4a7fc8; font-weight: 600; font-size: 16px;
         }
         QListWidget {
-            background: #f7f9fc; border: 1px solid #d8dde8; border-radius: 6px;
-            outline: none; color: #3a3f55; font-size: 11px; padding: 3px;
+            background: #f7f9fc; border: 2px solid #d8dde8; border-radius: 9px;
+            outline: none; color: #3a3f55; font-size: 16px; padding: 4px;
         }
-        QListWidget::item { padding: 5px 8px; border-radius: 4px; min-height: 20px; }
+        QListWidget::item { padding: 8px 12px; border-radius: 6px; min-height: 30px; }
         QListWidget::item:hover { background: #eaf1fb; }
         QListWidget::item:selected {
             background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #4a90e2, stop:1 #2fb8c0);
             color: #ffffff;
         }
-        QListWidget::item:selected:focus { border: 1px solid #2fb8c0; }
-        QScrollBar:vertical { background: transparent; width: 8px; border: none; margin: 0; }
-        QScrollBar::handle:vertical { background: #c0cad8; border-radius: 4px; min-height: 26px; margin: 2px; }
+        QListWidget::item:selected:focus { border: 2px solid #2fb8c0; }
+        QScrollBar:vertical { background: transparent; width: 12px; border: none; margin: 0; }
+        QScrollBar::handle:vertical { background: #c0cad8; border-radius: 6px; min-height: 39px; margin: 3px; }
         QScrollBar::handle:vertical:hover { background: #4a90e2; }
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
-        QLineEdit { background: #ffffff; color: #3a3f55; border: 1px solid #d8dde8; border-radius: 4px; padding: 3px 6px; }
-        QInputDialog QLabel { font-size: 11px; }
-        QInputDialog QPushButton { min-width: 60px; }
+        QLineEdit { background: #ffffff; color: #3a3f55; border: 2px solid #d8dde8; border-radius: 6px; padding: 4px 9px; }
+        QInputDialog QLabel { font-size: 16px; }
+        QInputDialog QPushButton { min-width: 90px; }
         QMenu {
-            background: #ffffff; border: 1px solid #c8d2e2; border-radius: 8px;
-            padding: 3px; margin: 0;
-            font-family: "Microsoft YaHei"; font-size: 11px; color: #3a3f55;
+            background: #ffffff; border: 2px solid #c8d2e2; border-radius: 12px;
+            padding: 4px; margin: 0;
+            font-family: "Microsoft YaHei"; font-size: 16px; color: #3a3f55;
         }
-        QMenu::item { padding: 5px 20px 5px 14px; border-radius: 4px; margin: 0 2px; }
+        QMenu::item { padding: 8px 30px 8px 21px; border-radius: 6px; margin: 0 3px; }
         QMenu::item:selected {
             background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #4a90e2, stop:1 #2fb8c0);
             color: #ffffff;
         }
-        QMenu::separator { height: 1px; background: #e0e5ee; margin: 3px 6px; }
+        QMenu::separator { height: 2px; background: #e0e5ee; margin: 4px 9px; }
         QPushButton {
-            font-family: "Microsoft YaHei"; font-size: 11px; color: #3a3f55;
+            font-family: "Microsoft YaHei"; font-size: 16px; color: #3a3f55;
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffffff, stop:1 #dce3ee);
-            border: 1px solid #b8c0d0; border-radius: 5px;
-            padding: 6px 12px; min-width: 56px;
+            border: 2px solid #b8c0d0; border-radius: 8px;
+            padding: 9px 18px; min-width: 84px;
         }
         QPushButton:hover {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #eaf3ff, stop:1 #c4dcf5);
-            border: 1px solid #4a90e2; color: #2456a0;
+            border: 2px solid #4a90e2; color: #2456a0;
         }
         QPushButton:pressed {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #c4dcf5, stop:1 #eaf3ff);
-            border: 1px solid #2a6fc0; color: #1a4a8a;
-            padding-top: 7px; padding-bottom: 5px;
+            border: 2px solid #2a6fc0; color: #1a4a8a;
+            padding-top: 10px; padding-bottom: 8px;
         }
         QPushButton#primary {
             color: #ffffff; font-weight: 600;
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #4aa3ff, stop:1 #2fb8c0);
-            border: 1px solid #2a8fc0;
+            border: 2px solid #2a8fc0;
         }
         QPushButton#primary:hover {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #5ab3ff, stop:1 #3fc8d0);
-            border: 1px solid #1a7fc0;
+            border: 2px solid #1a7fc0;
         }
         QPushButton#primary:pressed {
             background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #2fb8c0, stop:1 #4aa3ff);
         }
-        QPushButton:disabled { color: #a0a8b8; background: #f0f3f8; border: 1px solid #e0e5ee; }
+        QPushButton:disabled { color: #a0a8b8; background: #f0f3f8; border: 2px solid #e0e5ee; }
         QMessageBox { background: #ffffff; }
-        QMessageBox QLabel { color: #3a3f55; font-size: 11px; }
-        QMessageBox QPushButton { min-width: 60px; }
-        QCheckBox { font-family: "Microsoft YaHei"; font-size: 11px; color: #3a3f55; spacing: 4px; }
+        QMessageBox QLabel { color: #3a3f55; font-size: 16px; }
+        QMessageBox QPushButton { min-width: 90px; }
+        QCheckBox { font-family: "Microsoft YaHei"; font-size: 16px; color: #3a3f55; spacing: 6px; }
     """
 
     def _apply_tech_style(self):
@@ -5068,7 +5092,7 @@ class SettingsDialog(_DarkDialog):
         super().__init__("oi桌宠 v%s - 设置" % APP_VERSION, parent)
         self._pet = pet   # 用于尺寸滑块实时预览（改档立即热更新桌宠/气泡本体）
         self.setWindowIcon(_asset_icon("settings_icon.png"))
-        self.setMinimumSize(730, 560)
+        self.setMinimumSize(1095, 840)
         self._apply_tech_style()
         self.setFont(QFont("Microsoft YaHei"))
         self.settings = dict(settings)
@@ -5082,19 +5106,19 @@ class SettingsDialog(_DarkDialog):
         root = QHBoxLayout(self.body)
         # 上边距比左右小：QGroupBox 自带 12px 标题外边距，再留一圈 10px 会在
         # 标题栏下方形成一条明显空带
-        root.setContentsMargins(10, 3, 10, 10)
-        root.setSpacing(10)
+        root.setContentsMargins(15, 4, 15, 15)
+        root.setSpacing(15)
 
         # ===== 左列 =====
         left_col = QVBoxLayout()
         left_col.setContentsMargins(0, 0, 0, 0)   # 外层 root 已留边，列内不再叠一层默认边距
-        left_col.setSpacing(5)
+        left_col.setSpacing(8)
 
         # 桌宠外观
         appear_group = QGroupBox("桌宠外观")
         appear_layout = QVBoxLayout()
         img_row = QHBoxLayout()
-        _btn_compact = "min-width:0; padding:3px 12px;"
+        _btn_compact = "min-width:0; padding:4px 18px;"
         img_btn = QPushButton("更换图片")
         img_btn.setStyleSheet(_btn_compact)
         img_btn.clicked.connect(self._change_pet_image)
@@ -5108,7 +5132,7 @@ class SettingsDialog(_DarkDialog):
         clear_btn.setStyleSheet(_btn_compact)
         clear_btn.clicked.connect(self._clear_slots)
         img_row.addWidget(clear_btn)
-        img_row.addSpacing(12)
+        img_row.addSpacing(18)
         self.bubble_cb = QCheckBox("气泡")
         self.bubble_cb.setChecked(bool(settings.get("bubble_enabled", True)))
         self.bubble_cb.setToolTip("启用/停用气泡模块")
@@ -5119,28 +5143,28 @@ class SettingsDialog(_DarkDialog):
         # 滑动条右侧显示当前档位名
         self._bubble_slider = _StepSlider(Qt.Horizontal)
         self._bubble_slider.setRange(0, len(UI_SCALE_OPTIONS) - 1)
-        self._bubble_slider.setFixedWidth(140)
+        self._bubble_slider.setFixedWidth(210)
         self._bubble_slider.setValue(self._level_index(settings.get("bubble_scale", 1.0)))
         row_b = QHBoxLayout()
-        row_b.setSpacing(6)
-        row_b.setContentsMargins(12, 0, 0, 0)   # 与"更换图片"按钮文字左对齐（按钮 padding 12px）
+        row_b.setSpacing(9)
+        row_b.setContentsMargins(18, 0, 0, 0)   # 与"更换图片"按钮文字左对齐（按钮 padding 12px）
         row_b.addWidget(QLabel("气泡大小"))
         row_b.addWidget(self._bubble_slider, 1)
         self._bubble_lab = QLabel()
-        self._bubble_lab.setFixedWidth(40)
+        self._bubble_lab.setFixedWidth(60)
         row_b.addWidget(self._bubble_lab)
         appear_layout.addLayout(row_b)
         self._pet_slider = _StepSlider(Qt.Horizontal)
         self._pet_slider.setRange(0, len(UI_SCALE_OPTIONS) - 1)
-        self._pet_slider.setFixedWidth(140)
+        self._pet_slider.setFixedWidth(210)
         self._pet_slider.setValue(self._level_index(settings.get("pet_scale", 1.0)))
         row_p = QHBoxLayout()
-        row_p.setSpacing(6)
-        row_p.setContentsMargins(12, 0, 0, 0)   # 与"更换图片"按钮文字左对齐
+        row_p.setSpacing(9)
+        row_p.setContentsMargins(18, 0, 0, 0)   # 与"更换图片"按钮文字左对齐
         row_p.addWidget(QLabel("桌宠大小"))
         row_p.addWidget(self._pet_slider, 1)
         self._pet_lab = QLabel()
-        self._pet_lab.setFixedWidth(40)
+        self._pet_lab.setFixedWidth(60)
         row_p.addWidget(self._pet_lab)
         appear_layout.addLayout(row_p)
         self._bubble_slider.valueChanged.connect(self._live_apply_scales)
@@ -5149,8 +5173,8 @@ class SettingsDialog(_DarkDialog):
         # 记录打开时的初始档位（用于"是否修改过"判断，避免受已保存值影响）
         self._init_bubble = UI_SCALE_OPTIONS[self._bubble_slider.value()][1]
         self._init_pet = UI_SCALE_OPTIONS[self._pet_slider.value()][1]
-        appear_layout.setContentsMargins(4, 2, 4, 2)
-        appear_layout.setSpacing(2)
+        appear_layout.setContentsMargins(6, 3, 6, 3)
+        appear_layout.setSpacing(3)
         self.settings.setdefault("button_size", 25)
         self.temp_show_tooltips = settings.get("show_tooltips", True)
         appear_group.setLayout(appear_layout)
@@ -5159,16 +5183,16 @@ class SettingsDialog(_DarkDialog):
         # 信息栏：配置气泡模块（内置 + 自定义模块列表占主要空间）
         info_group = QGroupBox("气泡模块")
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(2)
-        info_layout.setContentsMargins(4, 1, 4, 2)
+        info_layout.setSpacing(3)
+        info_layout.setContentsMargins(6, 2, 6, 3)
         self.temp_status_enabled = dict(settings.get("status_enabled", {}))
         self.temp_status_rules = list(settings.get("status_rules", []))
         self._hidden_builtins = set(settings.get("hidden_builtins") or [])
         hdr_row = QHBoxLayout()
-        hdr_row.setSpacing(4)
+        hdr_row.setSpacing(6)
         self._rules_title_label = QLabel("模块列表")
         _lbl_title = self._rules_title_label
-        _lbl_title.setStyleSheet("color:#aab3c5; font-size:10px; padding-left:2px;")
+        _lbl_title.setStyleSheet("color:#aab3c5; font-size:15px; padding-left:3px;")
         # 描述：悬停标题立即显示（见 eventFilter）。
         # **故意不调 setToolTip**：那条走 Qt 的延迟原生提示，和 eventFilter 里
         # 的即时提示是两套，会先后各弹一个（位置还不一样）。只留即时那一个。
@@ -5183,7 +5207,7 @@ class SettingsDialog(_DarkDialog):
         for _t, _fn in [("导出", self._export_all_rules),
                         ("导入", self._import_rules)]:
             _b = QPushButton(_t)
-            _b.setStyleSheet("min-width:0; padding:1px 6px; font-size:11px; color:#d5dbe8;")
+            _b.setStyleSheet("min-width:0; padding:2px 9px; font-size:16px; color:#d5dbe8;")
             _b.setCursor(Qt.PointingHandCursor)
             _b.clicked.connect(_fn)
             hdr_row.addWidget(_b)
@@ -5191,15 +5215,15 @@ class SettingsDialog(_DarkDialog):
         # 两个入口：内置模块 / 已添加模块（点击切换下方列表）
         self._rules_tab = "builtin"
         tab_row = QHBoxLayout()
-        tab_row.setSpacing(4)
+        tab_row.setSpacing(6)
         self._tab_builtin = QPushButton("内置模块")
         self._tab_custom = QPushButton("已添加模块")
         for _b in (self._tab_builtin, self._tab_custom):
             _b.setCheckable(True)
             _b.setCursor(Qt.PointingHandCursor)
             _b.setStyleSheet(
-                "QPushButton{border:1px solid #39414f;border-radius:4px;"
-                "padding:2px 10px;font-size:11px;color:#aab3c5;background:#1f2634;}"
+                "QPushButton{border:2px solid #39414f;border-radius:6px;"
+                "padding:3px 15px;font-size:16px;color:#aab3c5;background:#1f2634;}"
                 "QPushButton:checked{border-color:#4a90e2;color:#ffffff;"
                 "background:rgba(74,144,226,80);}")
         self._tab_builtin.setChecked(True)
@@ -5213,8 +5237,8 @@ class SettingsDialog(_DarkDialog):
         self._btn_disable_all.setCursor(Qt.PointingHandCursor)
         self._btn_disable_all.setToolTip("取消所有模块的启用勾选（仅关闭，不会用于开启）")
         self._btn_disable_all.setStyleSheet(
-            "QPushButton{border:1px solid #39414f;border-radius:4px;"
-            "padding:2px 10px;font-size:11px;color:#aab3c5;background:#1f2634;}"
+            "QPushButton{border:2px solid #39414f;border-radius:6px;"
+            "padding:3px 15px;font-size:16px;color:#aab3c5;background:#1f2634;}"
             "QPushButton:hover{border-color:#4a90e2;color:#ffffff;"
             "background:rgba(74,144,226,80);}")
         self._btn_disable_all.clicked.connect(self._disable_all_rules)
@@ -5226,14 +5250,14 @@ class SettingsDialog(_DarkDialog):
         self.status_rules_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
         info_layout.addWidget(self.status_rules_list, 3)   # 列表占 3/4，测试框占低 1/4
         rbtn_row = QHBoxLayout()
-        rbtn_row.setSpacing(4)
+        rbtn_row.setSpacing(6)
         # 左栏固定 310px：padding 过大会让 5 个按钮挤出边界被裁切，故用紧凑 padding，
         # 并按文字宽度设最小宽度，保证任何缩放下都完整显示。
         for _t, _fn in [("＋ 添加", self._add_status_rule), ("编辑", self._edit_status_rule),
                         ("删除", self._del_status_rule), ("测试", self._test_status_rule)]:
             _b = QPushButton(_t)
             _b.setCursor(Qt.PointingHandCursor)
-            _b.setStyleSheet("min-width:0; padding:3px 7px; font-size:11px;")
+            _b.setStyleSheet("min-width:0; padding:4px 10px; font-size:16px;")
             _b.clicked.connect(_fn)
             rbtn_row.addWidget(_b)
         rbtn_row.addStretch()
@@ -5241,8 +5265,8 @@ class SettingsDialog(_DarkDialog):
         _ai_btn.setCursor(Qt.PointingHandCursor)
         _ai_btn.setToolTip("统一配置大模型接口（所有 AI 功能共用）+ AI 建模块权限")
         _ai_btn.setStyleSheet(
-            "QPushButton{min-width:0; padding:3px 9px; font-size:11px; color:#a8e6a3;"
-            "border:1px solid #3c6b4a;}"
+            "QPushButton{min-width:0; padding:4px 14px; font-size:16px; color:#a8e6a3;"
+            "border:2px solid #3c6b4a;}"
             "QPushButton:hover{border-color:#67c23a; color:#ffffff;"
             "background:rgba(103,194,58,60);}")
         _ai_btn.clicked.connect(self._open_ai_settings)
@@ -5250,6 +5274,9 @@ class SettingsDialog(_DarkDialog):
         info_layout.addLayout(rbtn_row)
         # 模块测试结果区：占模块区低 1/4（3:1 比例，打开/测试时大小一致）
         self.rules_result_view = ResultView(self)
+        # 80 不乘 1.5：ResultView 自己标了 oi_nozoom，旧版的整树放大跳过了它，
+        # 这里量到的一直就是 80。（它内部 clear()/show_result() 里的 _kv(120, k)
+        # 才是走缩放的那一路，已经烤过。）
         self.rules_result_view.setMinimumHeight(80)
         info_layout.addWidget(self.rules_result_view, 1)
         info_group.setLayout(info_layout)
@@ -5258,22 +5285,22 @@ class SettingsDialog(_DarkDialog):
 
         left_widget = QWidget()
         left_widget.setLayout(left_col)
-        left_widget.setFixedWidth(310)
+        left_widget.setFixedWidth(465)
         root.addWidget(left_widget)
 
         # ===== 右列：预览 + 确定/取消 =====
         right_col = QVBoxLayout()
         right_col.setContentsMargins(0, 0, 0, 0)
-        right_col.setSpacing(6)
+        right_col.setSpacing(9)
         right_title = QLabel("径向菜单预览")
-        right_title.setStyleSheet("color:#7aa9e8; font-weight:600; font-size:11px; padding-left:4px;")
+        right_title.setStyleSheet("color:#7aa9e8; font-weight:600; font-size:16px; padding-left:6px;")
         right_col.addWidget(right_title)
         self.preview = PreviewWidget()
-        self.preview.setMinimumHeight(_kit.ui(360))
+        self.preview.setMinimumHeight(_kit.ui(540))
         bs = self.settings.get("button_size", 25)
-        self.preview.set_slot_size(_kit.ui(max(32, int(bs * 1.2))))
+        self.preview.set_slot_size(max(48, int(bs * 1.2)))
         self.preview.set_pet_image_path(self.temp_pet_image)
-        self.preview.set_pet_preview_size(_kit.ui(max(min(self.temp_pet_size, 85), 70)))
+        self.preview.set_pet_preview_size(max(min(self.temp_pet_size, 128), 105))
         self.preview.set_pet_opacity(self.temp_pet_opacity)
         self.preview.shortcuts_changed.connect(self._on_preview_changed)
         self.preview.pet_image_changed.connect(self._on_pet_image_changed)
@@ -5296,13 +5323,15 @@ class SettingsDialog(_DarkDialog):
         help_label.setWordWrap(True)
         help_label.setStyleSheet(
             "font-family:'Microsoft YaHei'; color:#aab3c5; background:#1f2634;"
-            " border:1px solid #39414f; border-radius:6px;"
-            " padding:2px 6px; font-size:11px; line-height:120%;"
+            " border:2px solid #39414f; border-radius:9px;"
+            " padding:3px 9px; font-size:16px; line-height:120%;"
         )
 
         # 确定/取消 + 标签 + 拖尾同行（拖尾并入本行，省一行竖向空间）
         # 全局热键：在任意程序里按下就能唤出菜单（仅 Windows）
         hk_row = QHBoxLayout()
+        # 6 而不是 9：旧版整树放大的"继承判定"——子布局间距和父布局相等就当成没显式
+        # 设过而跳过。这一行和外层 right_col 都写了 6，所以一直没被放大。
         hk_row.setSpacing(6)
         hk_label = QLabel("唤出热键")
         hk_label.setToolTip("在任意程序里按下这个组合键，就在鼠标位置展开径向菜单")
@@ -5314,9 +5343,15 @@ class SettingsDialog(_DarkDialog):
         # 组合算，不再写死 —— 原来写死 170，占位说明被截成"如 Ctrl+Alt+Space，留空…"
         self.hk_edit.setStyleSheet("font-family:'%s';" % _kit._FONT)
         _fm = self.hk_edit.fontMetrics()
-        self.hk_edit.setFixedWidth(max(
+        # 这里的 ×1.5 是**故意留下**的，不是漏改的：
+        # 宽度 = 字体实测宽度 + 固定留白，而字体本身已经是放大后的 13.5pt；
+        # 旧版的整树放大又把 setFixedWidth 的结果整体乘了一遍 1.5，于是文字部分
+        # 相当于放大了两次，量出来是 414px（纯按内容算只要 276px）。
+        # 本次重构的验收标准是"显示尺寸和旧版逐像素一致"，所以照旧留 414。
+        # 想收窄成 276 请单独改，那是一次**可见的**外观调整。
+        self.hk_edit.setFixedWidth(int(round((max(
             _fm.horizontalAdvance(t) for t in
-            ("Ctrl+Alt+Shift+PageDown", self.hk_edit.placeholderText())) + _kit.ui(46))
+            ("Ctrl+Alt+Shift+PageDown", self.hk_edit.placeholderText())) + 69) * 1.5)))
         hk_row.addWidget(self.hk_edit)
         self.hk_at_cursor = QCheckBox("在鼠标处弹出")
         self.hk_at_cursor.setChecked(bool(settings.get("menu_hotkey_at_cursor", True)))
@@ -5324,7 +5359,7 @@ class SettingsDialog(_DarkDialog):
             "勾上：把桌宠移到鼠标位置再展开菜单（推荐）；取消：就在当前位置展开")
         hk_row.addWidget(self.hk_at_cursor)
         self.hk_warn = QLabel("")
-        self.hk_warn.setStyleSheet("color:#f0a35e; font-size:11px;")
+        self.hk_warn.setStyleSheet("color:#f0a35e; font-size:16px;")
         self.hk_warn.hide()
         hk_row.addWidget(self.hk_warn)
         self.hk_edit.captured.connect(self._check_hotkey_free)
@@ -5342,7 +5377,7 @@ class SettingsDialog(_DarkDialog):
 
 
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(6)
+        btn_layout.setSpacing(6)   # 同 hk_row：和父布局 right_col 同为 6，旧版没放大它
         self.cb_tooltips = QCheckBox("标签")
         self.cb_tooltips.setChecked(self.temp_show_tooltips)
         self.cb_tooltips.setToolTip("鼠标经过径向菜单按钮时是否弹出名称标签")
@@ -5365,13 +5400,13 @@ class SettingsDialog(_DarkDialog):
         self.version_label.setToolTip("oi桌宠当前版本，点击检查更新")
         self.version_label.setCursor(Qt.PointingHandCursor)
         self.version_label.setStyleSheet(
-            "QLabel{color:#7f8aa0; font-size:10px;}"
+            "QLabel{color:#7f8aa0; font-size:15px;}"
             "QLabel:hover{color:#4a90e2; text-decoration:underline;}")
         self.version_label.installEventFilter(self)
         btn_layout.addWidget(self.version_label)
         for text, slot in [("确定", self._on_accept), ("取消", self.reject)]:
             b = QPushButton(text)
-            b.setFixedWidth(90)
+            b.setFixedWidth(135)
             b.clicked.connect(slot)
             if text == "确定":
                 b.setObjectName("primary")
@@ -5454,12 +5489,12 @@ class SettingsDialog(_DarkDialog):
             if (_same_path(path, _DEFAULT_PET_IMAGES[1])
                     or _same_path(path, _default_pet_image_abs(_DEFAULT_PET_IMAGES[1]))):
                 self.rst_btn.setStyleSheet(
-                    "min-width:0; padding:3px 12px; color:#ffffff; font-weight:600;"
+                    "min-width:0; padding:4px 18px; color:#ffffff; font-weight:600;"
                     "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
                     " stop:0 #4aa3ff, stop:1 #2fb8c0);"
-                    "border:1px solid #2a8fc0;")
+                    "border:2px solid #2a8fc0;")
             else:
-                self.rst_btn.setStyleSheet("min-width:0; padding:3px 12px;")
+                self.rst_btn.setStyleSheet("min-width:0; padding:4px 18px;")
         except Exception:
             pass
 
@@ -5690,7 +5725,7 @@ class SettingsDialog(_DarkDialog):
             row.cb.stateChanged.connect(
                 lambda s, i=idx: self._set_rule_enabled(i, s == Qt.Checked))
             it = QListWidgetItem()
-            it.setSizeHint(QSize(_kit.ui(200), _kit.ui(26)))
+            it.setSizeHint(QSize(_kit.ui(300), _kit.ui(39)))
             self.status_rules_list.addItem(it)
             self.status_rules_list.setItemWidget(it, row)
 
@@ -5988,8 +6023,8 @@ class GravityPet(QWidget):
         from widgets import kit as _kit
         self._applied_bubble_scale = _kit.bubble_scale()
         self._applied_pet_scale = _kit.pet_scale()
-        self.pet_size = max(40, int(
-            self.settings.get("pet_size", self.pet_config.get("size", 75))
+        self.pet_size = max(60, int(
+            self.settings.get("pet_size", self.pet_config.get("size", 112.5))
             * _kit.pet_k()))
         self.pet_opacity = self.settings.get("pet_opacity", self.pet_config.get("opacity", 1.0))
         self.is_dragging = False
@@ -6749,7 +6784,7 @@ class GravityPet(QWidget):
         # 跨屏不受影响。
         cands = ((ld, "left"), (rd, "right"), (td, "top"), (bd, "bottom"))
         md, edge = min(cands, key=lambda it: it[0])
-        if md > _kit.ui(EDGE_SNAP_THRESHOLD):
+        if md > EDGE_SNAP_THRESHOLD:
             self.snapped_edge = None
             self._snap_screen = None
             self._snap_rotation = 0.0

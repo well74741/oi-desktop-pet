@@ -26,7 +26,7 @@ from bubble_ui import (StatusBubble, ChatPanel, _w_is_alive, _split_links,
 def _font7():
     from widgets import kit as _kit
     f = QFont("Microsoft YaHei")
-    f.setPointSizeF(7.5 * _kit.bubble_k())
+    f.setPointSizeF(11.25 * _kit.bubble_k())
     return f
 
 
@@ -34,14 +34,14 @@ def _font_h():
     """一行基础字号文字真正要占的高度（随气泡档位缩放）。
 
     这是**行内文本控件的最小高度**，不能超过卡片的内沿高度
-    （row_height − 上下各 bs(1) 的卡片内边距），否则布局满足不了最小值就会
-    向下溢出：文字被挤到卡片下半部、底部还被裁掉。原来这里额外加了 bs(4)，
+    （row_height − 上下各 bs(1.5) 的卡片内边距），否则布局满足不了最小值就会
+    向下溢出：文字被挤到卡片下半部、底部还被裁掉。原来这里额外加了 bs(6)，
     换成微软雅黑后（同字号行高 15→20px）最小值 26 > 行高 23，正是"内容文字
     偏低、出框"的原因。所以这里只取真实行高，余量由 row_height() 负责。
     """
     try:
         from widgets import kit as _kit
-        return _kit.text_height(7.5)
+        return _kit.text_height(11.25)
     except Exception:
         return 15
 
@@ -134,7 +134,7 @@ class _HandleLabel(QLabel):
 
     def __init__(self, parent=None):
         super().__init__("", parent)
-        self.setFixedWidth(_kit_sc_b(6))
+        self.setFixedWidth(_kit_sc_b(9))
         self.setCursor(Qt.PointingHandCursor)
 
     def paintEvent(self, event):
@@ -142,9 +142,12 @@ class _HandleLabel(QLabel):
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(140, 155, 185, 170))
         # 三点靠近顶部，避免高组件行的手柄显示在中间；点位随气泡档位缩放。
-        dot = max(2, _kit_sc_b(3))
+        dot = max(2, _kit_sc_b(4.5))
         half = dot / 2.0
-        for k in (4.0, 6.0, 8.0):
+        # 这三个数是喂给 _kit_sc_b 的基准值，和别处一样已含那 1.5
+        # （旧版写 4/6/8 再乘 1.5 得 6/9/12）。少乘的话三个点会往上挤 2px、
+        # 还会挨得太近连成一条短棍。
+        for k in (6.0, 9.0, 12.0):
             y = _kit_sc_b(k)
             p.drawEllipse(QRect(int(self.width() / 2 - half),
                                 int(y - half), dot, dot))
@@ -223,7 +226,7 @@ class _ModuleCard(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         from widgets import kit
         radius = kit.bubble_token("card_radius")
-        edge = max(1, _kit_sc_b(1))
+        edge = max(1, _kit_sc_b(1.5))
         if getattr(self, "_dragging", False):
             p.setPen(QPen(QColor(120, 200, 255, 230), edge))
         else:
@@ -251,8 +254,8 @@ class _LTextRow(QWidget):
         # 卡片只包内容，手柄留在左侧槽位（不占卡片内部空间）
         self._card = _ModuleCard(self)
         cl = QHBoxLayout(self._card)
-        cl.setContentsMargins(_kit_sc_b(5), _kit_sc_b(1),
-                              _kit_sc_b(5), _kit_sc_b(1))
+        cl.setContentsMargins(_kit_sc_b(7.5), _kit_sc_b(1.5),
+                              _kit_sc_b(7.5), _kit_sc_b(1.5))
         cl.setSpacing(0)
         self.title = QLabel("", self._card)
         from widgets import kit
@@ -390,8 +393,8 @@ class _LBtnRow(QWidget):
         lay.addWidget(self.handle)
         self._card = _ModuleCard(self)
         cl = QHBoxLayout(self._card)
-        cl.setContentsMargins(_kit_sc_b(5), _kit_sc_b(1),
-                              _kit_sc_b(5), _kit_sc_b(1))
+        cl.setContentsMargins(_kit_sc_b(7.5), _kit_sc_b(1.5),
+                              _kit_sc_b(7.5), _kit_sc_b(1.5))
         cl.setSpacing(0)
         self.title = QLabel("", self._card)
         from widgets import kit
@@ -455,16 +458,16 @@ class _LWidgetRow(QWidget):
         self._card = _ModuleCard(self)
         self._card_lay = QVBoxLayout(self._card)
         # 与文本行卡片一致，紧凑单行；间距也随气泡档位缩放。
-        self._card_lay.setContentsMargins(_kit_sc_b(5), _kit_sc_b(1),
-                                          _kit_sc_b(5), _kit_sc_b(1))
-        self._card_lay.setSpacing(_kit_sc_b(2))
+        self._card_lay.setContentsMargins(_kit_sc_b(7.5), _kit_sc_b(1.5),
+                                          _kit_sc_b(7.5), _kit_sc_b(1.5))
+        self._card_lay.setSpacing(_kit_sc_b(3))
         # 标题栏：标题 + 右端展开/收起按钮（在卡片内顶部）
         from widgets import kit
         self._head = QWidget(self._card)
         self._head.setAttribute(Qt.WA_TranslucentBackground, True)
         _hb = QHBoxLayout(self._head)
         _hb.setContentsMargins(0, 0, 0, 0)
-        _hb.setSpacing(_kit_sc_b(4))
+        _hb.setSpacing(_kit_sc_b(6))
         self._title_label = QLabel("", self._head)
         self._title_label.setFont(_font7())
         self._title_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -509,8 +512,8 @@ class _LWidgetRow(QWidget):
         # 无框架标题的组件（画布/拼豆/统计/Token 等自带标题栏）：卡片上下内边距
         # 归零，把整行高度让给组件。否则组件按 row_height 算好的 15px 会被上下
         # 各 1px 边距挤成 13px，自带标题栏里的「展开」按钮就嵌不正。
-        m_v = _kit_sc_b(1) if t else 0
-        self._card_lay.setContentsMargins(_kit_sc_b(5), m_v, _kit_sc_b(5), m_v)
+        m_v = _kit_sc_b(1.5) if t else 0
+        self._card_lay.setContentsMargins(_kit_sc_b(7.5), m_v, _kit_sc_b(7.5), m_v)
 
     def has_title(self):
         # 用 isHidden 而非 isVisible：布局阶段组件可能尚未显示，isVisible 会误判
@@ -586,14 +589,14 @@ class StatusBubbleLayout(StatusBubble):
         self._op_slider = QSlider(Qt.Horizontal, self)
         self._op_slider.setRange(30, 100)
         self._op_slider.setValue(int(round(self._bubble_opacity * 100)))
-        self._op_slider.setFixedSize(_kit_sc_b(42), _kit_sc_b(14))
+        self._op_slider.setFixedSize(_kit_sc_b(63), _kit_sc_b(21))
         self._op_slider.setCursor(Qt.PointingHandCursor)
         self._op_slider.setToolTip("气泡透明度")
         self._op_slider.setStyleSheet(_kit_sc_qss(
-            "QSlider::groove:horizontal{height:3px;"
-            "background:rgba(255,255,255,45);border-radius:1px;}"
-            "QSlider::handle:horizontal{width:7px;height:7px;margin:-3px 0;"
-            "border-radius:4px;background:rgba(200,215,240,210);}"))
+            "QSlider::groove:horizontal{height:4.5px;"
+            "background:rgba(255,255,255,45);border-radius:1.5px;}"
+            "QSlider::handle:horizontal{width:10.5px;height:10.5px;margin:-4.5px 0;"
+            "border-radius:6px;background:rgba(200,215,240,210);}"))
         self._op_slider.valueChanged.connect(self._on_bubble_opacity)
         # 内容层会盖住右上角按钮，必须把钉住/关闭按钮提到最上层
         self._pin_btn.raise_()
@@ -615,10 +618,10 @@ class StatusBubbleLayout(StatusBubble):
         col.setFixedWidth(int(getattr(self, "_FIX_W", 200)))
         v = QVBoxLayout(col)
         v.setContentsMargins(self._out_m,
-                             max(0, self._HEAD_H - _kit_sc_b(3)),
+                             max(0, self._HEAD_H - _kit_sc_b(4.5)),
                              self._out_m + self._handle_w,
-                             _kit_sc_b(2))
-        v.setSpacing(_kit_sc_b(1))
+                             _kit_sc_b(3))
+        v.setSpacing(_kit_sc_b(1.5))
         col.show()
         self._columns.append(col)
         return v
@@ -639,7 +642,7 @@ class StatusBubbleLayout(StatusBubble):
             scr = QApplication.screenAt(
                 self.pet.mapToGlobal(self.pet.rect().center())) \
                 or QApplication.primaryScreen()
-            return max(_kit_sc_b(160), scr.availableGeometry().height() - _kit_sc_b(28))
+            return max(_kit_sc_b(240), scr.availableGeometry().height() - _kit_sc_b(42))
         except Exception:
             return 10 ** 6          # 取不到屏幕信息就别分列
 
@@ -663,7 +666,7 @@ class StatusBubbleLayout(StatusBubble):
         """
         limit = self._max_col_h()
         m = self._vbox.contentsMargins()
-        pad = m.top() + m.bottom() + _kit_sc_b(4)
+        pad = m.top() + m.bottom() + _kit_sc_b(6)
         gap = self._vbox.spacing()
 
         def pack(h_limit):
@@ -768,7 +771,7 @@ class StatusBubbleLayout(StatusBubble):
             width = self._FIX_W
             # 值区宽度 = 卡片宽 - 卡片内边距 - 标题
             avail = (width - 2 * (self._out_m + self._handle_w)
-                     - _kit_sc_b(10) - self._title_w - _kit_sc_b(2))
+                     - _kit_sc_b(15) - self._title_w - _kit_sc_b(3))
             rows_data = []
             keys = []
             for i, (title, value, widget) in enumerate(rows):
@@ -1129,8 +1132,8 @@ class StatusBubbleLayout(StatusBubble):
         col_w = int(col_w or self._FIX_W)
         m = self._vbox.contentsMargins()
         gap = self._vbox.spacing()
-        pad = m.top() + m.bottom() + _kit_sc_b(4)
-        floor_h = self._HEAD_H + _kit_sc_b(8)
+        pad = m.top() + m.bottom() + _kit_sc_b(6)
+        floor_h = self._HEAD_H + _kit_sc_b(12)
         rows = [w for w in self._row_widgets if _w_is_alive(w)]
         cols = self._split_columns(rows)
         col_hs = []
@@ -1183,18 +1186,18 @@ class StatusBubbleLayout(StatusBubble):
                 lay.activate()
         # 右上角悬浮控件定位：钉住 / 关闭 / 透明度滑块，尺寸与间距随气泡档位一起缩放，
         # 否则按钮放大后仍按固定偏移会重叠错位。
-        _btn_w = _kit_sc_b(16)
-        _slider_w = _kit_sc_b(42)
-        _rm = _kit_sc_b(6)      # 关闭按钮距右边缘
-        _gap1 = _kit_sc_b(2)    # 钉住↔关闭 间距
-        _gap2 = _kit_sc_b(4)    # 透明度↔钉住 间距
+        _btn_w = _kit_sc_b(24)
+        _slider_w = _kit_sc_b(63)
+        _rm = _kit_sc_b(9)      # 关闭按钮距右边缘
+        _gap1 = _kit_sc_b(3)    # 钉住↔关闭 间距
+        _gap2 = _kit_sc_b(6)    # 透明度↔钉住 间距
         _fold_x = width - _rm - _btn_w
         _pin_x = _fold_x - _gap1 - _btn_w
         _slider_x = _pin_x - _gap2 - _slider_w
         # 三个控件在标题栏内统一垂直居中。视觉标题带是气泡圆角框内的 [1, _HEAD_H]，
         # 取其整数中心后各自减去半高——必须用整数运算：先前用 round() 时
         # 银行家舍入让 2.5→2 而 3.5→4，导致滑块比按钮低 1px（小档位下很明显）。
-        _head = max(_kit_sc_b(14), int(getattr(self, "_HEAD_H", 0) or _kit_sc_b(20)))
+        _head = max(_kit_sc_b(21), int(getattr(self, "_HEAD_H", 0) or _kit_sc_b(30)))
         _band_c = (1 + _head) // 2
         _btn_y = max(0, _band_c - self._pin_btn.height() // 2)
         _sld_y = max(0, _band_c - self._op_slider.height() // 2)
@@ -1293,7 +1296,7 @@ class StatusBubbleLayout(StatusBubble):
 
     def sizeHint(self):
         return QSize(self._FIX_W,
-                     getattr(self, "_full_h", self._HEAD_H + _kit_sc_b(8)))
+                     getattr(self, "_full_h", self._HEAD_H + _kit_sc_b(12)))
 
     def _apply_col_mask(self, width, full_h):
         """短列下面那块空白要"不存在"：用窗口遮罩把它挖掉。
@@ -1328,7 +1331,7 @@ class StatusBubbleLayout(StatusBubble):
         p.setRenderHint(QPainter.Antialiasing)
         p.setBrush(QColor(28, 32, 44, 255))   # 底色完全不透明，透明度交给滑块（窗口透明度）
         p.setPen(QPen(QColor(255, 255, 255, 45), 1))
-        r = _kit_sc_b(6)
+        r = _kit_sc_b(9)
         panels = getattr(self, "_col_panels", None) or [(0, 0, self.width(),
                                                          self.height())]
         for x, y, w, h in panels:

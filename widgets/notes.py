@@ -15,7 +15,7 @@ from widgets import ModuleWidget, kit
 class Widget(ModuleWidget):
     """便签组件：输入即存，可清空。"""
 
-    FIX_H = 150
+    FIX_H = 225
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -23,11 +23,11 @@ class Widget(ModuleWidget):
 
         self._edit = QPlainTextEdit(self)
         self._edit.setPlaceholderText("记点什么…（自动保存）")
-        self._edit.setFont(kit.font_pt(9))
+        self._edit.setFont(kit.font_pt(13.5))
         self._edit.setStyleSheet(kit.scale_qss(
-            "QPlainTextEdit{background:rgba(255,255,255,22);border:1px solid "
-            "rgba(255,255,255,45);border-radius:4px;color:#e8ecf5;"
-            "padding:4px;font-family:Microsoft YaHei;font-size:10px;}"))
+            "QPlainTextEdit{background:rgba(255,255,255,22);border:1.5px solid "
+            "rgba(255,255,255,45);border-radius:6px;color:#e8ecf5;"
+            "padding:6px;font-family:Microsoft YaHei;font-size:15px;}"))
         self._edit.textChanged.connect(self._on_changed)
         clear_btn = kit.btn("清空", small=True)
         clear_btn.setCursor(Qt.PointingHandCursor)
@@ -35,9 +35,9 @@ class Widget(ModuleWidget):
 
         lay = kit.col(
             self._edit,
-            kit.row(kit.lab("便签", size=7, color="#96a7c4"), kit.hsep(),
+            kit.row(kit.lab("便签", size=10.5, color="#96a7c4"), kit.hsep(),
                     clear_btn),
-            spacing=3, margins=(0, 2, 0, 3))   # 横向边距由模块卡片统一控制
+            spacing=4.5, margins=(0, 3, 0, 4.5))   # 横向边距由模块卡片统一控制
         self.setLayout(lay)
         self._load()
 

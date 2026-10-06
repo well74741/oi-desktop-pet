@@ -90,8 +90,8 @@ class DockBar(QWidget):
     """
 
     SYNC_MS = 120          # 盯父窗口尺寸的间隔（只在变化时才动手，代价极低）
-    EDGE_W = 14            # 收起态留的那条窄边（逻辑像素）
-    HANDLE_H = 64          # 收起态只占这么高（居中），不再贴满整条左缘
+    EDGE_W = 21            # 收起态留的那条窄边（逻辑像素）
+    HANDLE_H = 96          # 收起态只占这么高（居中），不再贴满整条左缘
     COLLAPSED_ALPHA = 79   # 收起态不透明度（255 的 31%，= 约 69% 透明）
     SLIDE_MS = 16          # 滑出/滑回的动画步长
     SLIDE_DUR = 0.18       # 滑出/滑回的时长（秒），和桌宠其他折叠动画一个手感
@@ -283,7 +283,7 @@ class DockBar(QWidget):
         # 以前是把全宽的栏钉在 x=0 让窗口去裁，收起时露出来的是半个按钮
         # ——用户说的"强行裁切了一条，显示也不完整"。
         self.bar.setGeometry(w - self._full_w, 0, self._full_w, h)
-        show_bar = w > self._edge_w + kit.ui(2)
+        show_bar = w > self._edge_w + kit.ui(3)
         if show_bar != self.bar.isVisible():
             self.bar.setVisible(show_bar)
         self._apply_region(w, h, not show_bar)
@@ -328,7 +328,7 @@ class DockBar(QWidget):
             p.drawLine(w - 1, 0, w - 1, h)
             return
         p.fillRect(0, 0, w, h, QColor(28, 35, 49))
-        gw, gh = max(2, kit.ui(3)), min(kit.ui(26), max(kit.ui(8), h - kit.ui(16)))
+        gw, gh = max(2, kit.ui(4)), min(kit.ui(39), max(kit.ui(12), h - kit.ui(24)))
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(74, 158, 255, 210))
         p.drawRoundedRect(QRectF((w - gw) / 2.0, (h - gh) / 2.0, gw, gh),
@@ -352,7 +352,7 @@ class DockBar(QWidget):
                 _u.SetWindowRgn(hw, None, True)
                 self._rgn_now = key
                 return
-            r = max(2, kit.ui(5))
+            r = max(2, kit.ui(8))
             rgn = _g.CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2)
             left = _g.CreateRectRgn(0, 0, r, h + 1)      # 左边两角填回直角
             _g.CombineRgn(rgn, rgn, left, _RGN_OR)

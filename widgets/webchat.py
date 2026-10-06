@@ -25,13 +25,13 @@ from widgets import ModuleWidget, kit
 class Widget(ModuleWidget):
     """气泡组件：一行 = 模块名 + 打开按钮。"""
 
-    FIX_H = 15
+    FIX_H = 22.5
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._label = "聚合AI"
 
-        self._name = kit.lab(self._label, size=7, color="#a8e6a3", bold=True)
+        self._name = kit.lab(self._label, size=10.5, color="#a8e6a3", bold=True)
         self._open_btn = kit.btn("打开", primary=True, small=True)
         self._open_btn.setCursor(Qt.PointingHandCursor)
         self._open_btn.clicked.connect(self._on_click)
@@ -41,7 +41,7 @@ class Widget(ModuleWidget):
         # 横向边距交给模块卡片统一控制（卡片已有内边距），组件内部不再另加，
         # 否则按钮会比文本行的值多缩进一截，出现"按钮没贴边/右边缘不齐"。
         lay = kit.row(self._name, spacer, self._open_btn,
-                      spacing=4, margins=(0, 0, 0, 0))
+                      spacing=6, margins=(0, 0, 0, 0))
         lay.setStretch(1, 1)   # spacer 弹性占位，把按钮顶到右边
         self.setLayout(lay)
 

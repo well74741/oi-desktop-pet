@@ -15,7 +15,7 @@ from widgets import ModuleWidget, kit
 class Widget(ModuleWidget):
     """健康打卡：喝水杯数 / 运动次数 / 睡眠时长（小时），每日记录。"""
 
-    FIX_H = 130
+    FIX_H = 195
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,9 +24,9 @@ class Widget(ModuleWidget):
         self._sleep = 0.0
         self._day = ""
 
-        self._w_label = kit.lab("喝水 0 杯", size=11, color="#7db6ff", bold=True)
-        self._e_label = kit.lab("运动 0 次", size=11, color="#69db7c", bold=True)
-        self._s_label = kit.lab("睡眠 0.0 h", size=11, color="#9775fa", bold=True)
+        self._w_label = kit.lab("喝水 0 杯", size=16.5, color="#7db6ff", bold=True)
+        self._e_label = kit.lab("运动 0 次", size=16.5, color="#69db7c", bold=True)
+        self._s_label = kit.lab("睡眠 0.0 h", size=16.5, color="#9775fa", bold=True)
         w_btn = kit.btn("+1", primary=True)
         w_btn.setCursor(Qt.PointingHandCursor)
         w_btn.clicked.connect(self._add_water)
@@ -44,8 +44,8 @@ class Widget(ModuleWidget):
             kit.row(self._w_label, kit.hsep(), w_btn),
             kit.row(self._e_label, kit.hsep(), e_btn),
             kit.row(self._s_label, kit.hsep(), s_btn),
-            kit.row(kit.lab("今日打卡", size=7, color="#96a7c4"), kit.hsep(), reset),
-            spacing=3, margins=(4, 2, 4, 3))
+            kit.row(kit.lab("今日打卡", size=10.5, color="#96a7c4"), kit.hsep(), reset),
+            spacing=4.5, margins=(6, 3, 6, 4.5))
         self.setLayout(lay)
         self._load()
 

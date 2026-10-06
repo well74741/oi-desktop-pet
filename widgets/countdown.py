@@ -15,7 +15,7 @@ from widgets import ModuleWidget, kit
 class Widget(ModuleWidget):
     """倒计时组件：分钟输入 + 开始/暂停/重置，到点提醒。"""
 
-    FIX_H = 90
+    FIX_H = 135
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,18 +27,18 @@ class Widget(ModuleWidget):
         self._min_spin = QSpinBox(self)
         self._min_spin.setRange(0, 600)
         self._min_spin.setSuffix(" 分")
-        self._min_spin.setFixedWidth(kit.bs(70))
+        self._min_spin.setFixedWidth(kit.bs(105))
         self._sec_spin = QSpinBox(self)
         self._sec_spin.setRange(0, 59)
         self._sec_spin.setSuffix(" 秒")
-        self._sec_spin.setFixedWidth(kit.bs(70))
+        self._sec_spin.setFixedWidth(kit.bs(105))
         for s in (self._min_spin, self._sec_spin):
             s.setStyleSheet(kit.scale_qss(
-                "QSpinBox{background:rgba(255,255,255,22);border:1px solid "
-                "rgba(255,255,255,45);border-radius:4px;color:#e8ecf5;"
-                "font-family:Microsoft YaHei;font-size:10px;}"))
+                "QSpinBox{background:rgba(255,255,255,22);border:1.5px solid "
+                "rgba(255,255,255,45);border-radius:6px;color:#e8ecf5;"
+                "font-family:Microsoft YaHei;font-size:15px;}"))
 
-        self._label = kit.lab("0:00", size=20, bold=True,
+        self._label = kit.lab("0:00", size=30, bold=True,
                               align=Qt.AlignCenter, wrap=False)
         self._toggle_btn = kit.btn("开始", primary=True)
         self._toggle_btn.setCursor(Qt.PointingHandCursor)
@@ -58,7 +58,7 @@ class Widget(ModuleWidget):
             self._label,
             kit.row(self._toggle_btn, self._reset_btn, kit.hsep(),
                     self._preset, self._preset2),
-            spacing=3, margins=(4, 2, 4, 3))
+            spacing=4.5, margins=(6, 3, 6, 4.5))
         self.setLayout(lay)
         self._timer = QTimer(self)
         self._timer.setInterval(250)

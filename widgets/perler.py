@@ -21,7 +21,7 @@ _PALETTE = kit.PALETTE   # 画布/拼豆共用一份（见 kit.PALETTE）
 
 _COLS = 11            # 列数
 _ROWS = 10            # 行数
-_CELL = 16            # 每格 16px → 网格 11*16 ≈ 176px（填满内容区，右侧无空隙）
+_CELL = 24            # 每格 16px → 网格 11*16 ≈ 176px（填满内容区，右侧无空隙）
 _GRID_H = _CELL * _ROWS + 4
 
 
@@ -33,7 +33,7 @@ def _pix_icon(kind):
 class Widget(ModuleWidget):
     """拼豆：11x10 像素填色。"""
 
-    FIX_H = 15
+    FIX_H = 22.5
     def __init__(self, parent=None):
         super().__init__(parent)
         self._collapsed = True
@@ -46,7 +46,7 @@ class Widget(ModuleWidget):
         self._root.setContentsMargins(0, 0, 0, 0)
         self._root.setSpacing(0)
 
-        self._ai_btn = kit.ghost_btn("AI", 22, 13, "AI 绘画：让 AI 按描述在拼豆上画像素图")
+        self._ai_btn = kit.ghost_btn("AI", 33, 13, "AI 绘画：让 AI 按描述在拼豆上画像素图")
         self._ai_btn.clicked.connect(self._ai_draw)
         self._fold_btn = kit.expand_btn("展开")
         self._fold_btn.clicked.connect(self._toggle_fold)
@@ -58,19 +58,19 @@ class Widget(ModuleWidget):
         self._expand = QWidget(self)
         el = QVBoxLayout(self._expand)
         el.setContentsMargins(0, 0, 0, 0)
-        el.setSpacing(kit.bs(2))
+        el.setSpacing(kit.bs(3))
 
         # 工具行：填色 / 删除 / 当前颜色块 / 清空 —— 自适应拉长填满
         bar1 = QWidget(self._expand)
-        bar1.setFixedHeight(kit.bs(16))
-        b1 = kit.row(margins=(0, 0, 0, 0), spacing=2)
+        bar1.setFixedHeight(kit.bs(24))
+        b1 = kit.row(margins=(0, 0, 0, 0), spacing=3)
         self._btn_pen = self._tool_btn(bar1, "pen", "填色")
         self._btn_erase = self._tool_btn(bar1, "erase", "删除")
         b1.addWidget(self._btn_pen, 1, Qt.AlignVCenter)     # stretch 拉长
         b1.addWidget(self._btn_erase, 1, Qt.AlignVCenter)
         # 当前颜色块（长方形，点击也作为填色提示）
         self._cur_color = QLabel("", bar1)
-        self._cur_color.setFixedHeight(kit.bs(14))
+        self._cur_color.setFixedHeight(kit.bs(21))
         self._cur_color.setCursor(Qt.PointingHandCursor)
         self._cur_color.setToolTip("当前颜色")
         b1.addWidget(self._cur_color, 1, Qt.AlignVCenter)
@@ -78,13 +78,13 @@ class Widget(ModuleWidget):
         self._clear_btn = QPushButton("", bar1)
         self._clear_btn.setToolTip("清空")
         self._clear_btn.setCursor(Qt.PointingHandCursor)
-        self._clear_btn.setFixedHeight(kit.bs(14))
+        self._clear_btn.setFixedHeight(kit.bs(21))
         self._clear_btn.setIcon(_pix_icon("trash"))
         self._clear_btn.setIconSize(__import__("PyQt5.QtCore",
-                                               fromlist=["QSize"]).QSize(kit.bs(13), kit.bs(13)))
+                                               fromlist=["QSize"]).QSize(kit.bs(19.5), kit.bs(19.5)))
         self._clear_btn.clicked.connect(self._clear_all)
         self._clear_btn.setStyleSheet(kit.scale_qss(
-            "QPushButton{border:1px solid rgba(255,255,255,40);border-radius:3px;"
+            "QPushButton{border:1.5px solid rgba(255,255,255,40);border-radius:4.5px;"
             "background:transparent;}"
             "QPushButton:hover{background:rgba(74,144,226,90);}"))
         b1.addWidget(self._clear_btn, 1, Qt.AlignVCenter)
@@ -93,17 +93,17 @@ class Widget(ModuleWidget):
 
         # 颜色行（简化）：一排色块，紧贴网格上方
         bar2 = QWidget(self._expand)
-        bar2.setFixedHeight(kit.bs(16))
-        b2 = kit.row(margins=(0, 0, 0, 0), spacing=2)
+        bar2.setFixedHeight(kit.bs(24))
+        b2 = kit.row(margins=(0, 0, 0, 0), spacing=3)
         self._color_btns = []
         for c in _PALETTE:
             cb = QPushButton("", bar2)
             cb.setToolTip(c)
-            cb.setFixedSize(kit.bs(14), kit.bs(14))
+            cb.setFixedSize(kit.bs(21), kit.bs(21))
             cb.setCursor(Qt.PointingHandCursor)
             cb.setStyleSheet(kit.scale_qss(
-                "QPushButton{border:1px solid rgba(255,255,255,70);"
-                "border-radius:7px;background:%s;}" % c))
+                "QPushButton{border:1.5px solid rgba(255,255,255,70);"
+                "border-radius:10.5px;background:%s;}" % c))
             cb.clicked.connect(lambda _=False, cc=c: self._set_color(cc))
             self._color_btns.append(cb)
             b2.addWidget(cb, 1, Qt.AlignVCenter)    # 色块拉长铺满一行（间距均匀）
@@ -143,7 +143,7 @@ class Widget(ModuleWidget):
         b.setIconSize(QSize(kit.bubble_token("icon"), kit.bubble_token("icon")))
         b.clicked.connect(lambda _=False, k=kind: self._set_tool(k))
         b.setStyleSheet(kit.scale_qss(
-            "QPushButton{border:1px solid rgba(255,255,255,40);border-radius:3px;"
+            "QPushButton{border:1.5px solid rgba(255,255,255,40);border-radius:4.5px;"
             "background:transparent;}"
             "QPushButton:checked{border-color:#4a90e2;"
             "background:rgba(74,144,226,120);}"
@@ -177,11 +177,11 @@ class Widget(ModuleWidget):
         self._grid.set_pen_color(c)
         self._set_tool("pen")   # 选色后自动切回填色模式
         self._cur_color.setStyleSheet(kit.scale_qss(
-            "QLabel{border:1px solid rgba(255,255,255,70);border-radius:3px;"
+            "QLabel{border:1.5px solid rgba(255,255,255,70);border-radius:4.5px;"
             "background:%s;}" % c))
         for cb, cc in zip(self._color_btns, _PALETTE):
             cb.setStyleSheet(kit.scale_qss(
-                "QPushButton{border:2px solid %s;border-radius:7px;background:%s;}"
+                "QPushButton{border:3px solid %s;border-radius:10.5px;background:%s;}"
                 % ("#ffffff" if cc == c else "rgba(255,255,255,70)", cc)))
 
     def _clear_all(self):
@@ -305,8 +305,8 @@ class Widget(ModuleWidget):
             return kit.row_height()
         # 标题/工具/状态高度统一取 kit 规范，间距也随档位缩放。
         grid_h = kit.bs(_CELL) * _ROWS + 2
-        return (kit.header_row_height(True) + kit.bs(2) + kit.toolbar_height() + kit.bs(2)
-                + kit.toolbar_height() + kit.bs(2) + grid_h + kit.bs(2)
+        return (kit.header_row_height(True) + kit.bs(3) + kit.toolbar_height() + kit.bs(3)
+                + kit.toolbar_height() + kit.bs(3) + grid_h + kit.bs(3)
                 + kit.caption_height())
 
     def _toggle_fold(self):

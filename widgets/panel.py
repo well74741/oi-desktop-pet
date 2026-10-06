@@ -14,7 +14,7 @@ from widgets import ModuleWidget
 
 
 class Widget(ModuleWidget):
-    FIX_H = 158   # 组件固定高度；框架按此排行高
+    FIX_H = 237   # 组件固定高度；框架按此排行高
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,20 +22,20 @@ class Widget(ModuleWidget):
         self._log = []
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(kit.bs(6), kit.bs(4),
-                               kit.bs(6), kit.bs(4))
-        lay.setSpacing(kit.bs(4))
+        lay.setContentsMargins(kit.bs(9), kit.bs(6),
+                               kit.bs(9), kit.bs(6))
+        lay.setSpacing(kit.bs(6))
 
         head = kit.row()
-        self.title = kit.lab("控制面板", size=11, bold=True)
+        self.title = kit.lab("控制面板", size=16.5, bold=True)
         head.addWidget(self.title)
         head.addStretch()
-        self.state_lab = kit.lab("已开启", size=9, color="#7dc98f")
+        self.state_lab = kit.lab("已开启", size=13.5, color="#7dc98f")
         head.addWidget(self.state_lab)
         lay.addLayout(head)
 
         bar_row = kit.row()
-        self.bar_lab = kit.lab("负载 0%", size=9, color="#9fb0cc", wrap=False)
+        self.bar_lab = kit.lab("负载 0%", size=13.5, color="#9fb0cc", wrap=False)
         bar_row.addWidget(self.bar_lab)
         bar_row.addStretch()
         self.bar = kit.progress(0)
@@ -57,7 +57,7 @@ class Widget(ModuleWidget):
 
         self.listw = QListWidget()
         self.listw.setSelectionMode(QListWidget.NoSelection)
-        lay.addWidget(kit.scroll(self.listw, max_h=64))
+        lay.addWidget(kit.scroll(self.listw, max_h=96))
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)

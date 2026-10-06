@@ -65,32 +65,32 @@ def enable_webengine():
 _SCROLL_QSS = (
     "QScrollArea{background:transparent;border:none;}"
     "QScrollArea > QWidget > QWidget{background:transparent;}"
-    "QScrollBar:vertical{background:transparent;width:4px;margin:0;}"
+    "QScrollBar:vertical{background:transparent;width:6px;margin:0;}"
     "QScrollBar::handle:vertical{background:rgba(255,255,255,75);"
-    "border-radius:2px;min-height:16px;}"
+    "border-radius:3px;min-height:24px;}"
     "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
     "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
 )
 _TEXT_QSS = (
     "QTextBrowser{background:transparent;border:none;color:#e8ecf5;"
-    "font-size:10px;padding:1px 2px;}"
-    "QScrollBar:vertical{background:transparent;width:4px;margin:0;}"
+    "font-size:15px;padding:1.5px 3px;}"
+    "QScrollBar:vertical{background:transparent;width:6px;margin:0;}"
     "QScrollBar::handle:vertical{background:rgba(255,255,255,75);"
-    "border-radius:2px;min-height:16px;}"
+    "border-radius:3px;min-height:24px;}"
     "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
     "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
 )
 _TEXT_LAB_QSS = (
-    "QLabel{background:transparent;color:#e8ecf5;font-size:10px;padding:1px 2px;}"
+    "QLabel{background:transparent;color:#e8ecf5;font-size:15px;padding:1.5px 3px;}"
 )
 _LIST_QSS = (
-    "QListWidget{background:rgba(255,255,255,18);border:none;border-radius:4px;"
-    "color:#e8ecf5;font-size:10px;padding:1px 2px;}"
-    "QListWidget::item{padding:1px 2px;}"
+    "QListWidget{background:rgba(255,255,255,18);border:none;border-radius:6px;"
+    "color:#e8ecf5;font-size:15px;padding:1.5px 3px;}"
+    "QListWidget::item{padding:1.5px 3px;}"
     "QListWidget::item:selected{background:rgba(74,144,226,90);}"
-    "QScrollBar:vertical{background:transparent;width:4px;margin:0;}"
+    "QScrollBar:vertical{background:transparent;width:6px;margin:0;}"
     "QScrollBar::handle:vertical{background:rgba(255,255,255,75);"
-    "border-radius:2px;min-height:16px;}"
+    "border-radius:3px;min-height:24px;}"
     "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
     "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
 )
@@ -99,12 +99,9 @@ _HTML_RE = re.compile(r"<[a-zA-Z/][^>]*>")
 
 
 def _default_k():
-    """卡片默认倍率：界面基准倍率（设置/编辑窗口里的测试区）；气泡内传 bubble_k。"""
-    try:
-        from widgets import kit
-        return kit.UI_BASE
-    except Exception:
-        return 1.0
+    """卡片默认倍率：普通窗口里的测试区用 1.0（数值即最终像素）；气泡内由调用方传
+    bubble_k()。以前这里返回 UI_BASE=1.5，那个 1.5 已烘进各处基准值。"""
+    return 1.0
 
 
 def _kv(v, k):
@@ -203,10 +200,10 @@ class CardView(QWidget):
         self.bridge = H5Bridge(self)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(_kv(2, k))
+        lay.setSpacing(_kv(3, k))
         if card.title:
             t = QLabel(card.title)
-            t.setStyleSheet(_kq("color:#cfe0ff;font-size:10px;padding:0 2px;", k))
+            t.setStyleSheet(_kq("color:#cfe0ff;font-size:15px;padding:0 3px;", k))
             lay.addWidget(t)
         lay.addWidget(self._build_body(card), 1)
 
@@ -346,10 +343,10 @@ class PomodoroState:
 class PomodoroCard(QWidget):
     """番茄时钟交互卡片：倒计时 + 开始/暂停/重置；状态绑定规则脚本的 state 字典。"""
 
-    FIX_H = 72
+    FIX_H = 108
     _QSS = (
-        "QPushButton{border:none;background:rgba(255,255,255,35);border-radius:4px;"
-        "color:#e8ecf5;font-family:Microsoft YaHei;font-size:10px;padding:2px 8px;}"
+        "QPushButton{border:none;background:rgba(255,255,255,35);border-radius:6px;"
+        "color:#e8ecf5;font-family:Microsoft YaHei;font-size:15px;padding:3px 12px;}"
         "QPushButton:hover{background:rgba(255,255,255,70);}"
         "QPushButton:pressed{background:rgba(74,144,226,120);}"
     )
@@ -368,8 +365,8 @@ class PomodoroCard(QWidget):
         self.state.setdefault("break", 5 * 60)
         self.setFixedHeight(_kv(self.FIX_H, k))
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(_kv(4, k), _kv(2, k), _kv(4, k), _kv(4, k))   # 底部留白，按钮不贴卡片下框
-        lay.setSpacing(_kv(1, k))
+        lay.setContentsMargins(_kv(6, k), _kv(3, k), _kv(6, k), _kv(6, k))   # 底部留白，按钮不贴卡片下框
+        lay.setSpacing(_kv(1.5, k))
         self.time_label = QLabel()
         self.time_label.setAlignment(Qt.AlignCenter)
         f = QFont("Microsoft YaHei")
@@ -380,7 +377,7 @@ class PomodoroCard(QWidget):
         lay.addWidget(self.time_label, 1)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(_kv(6, k))
+        row.setSpacing(_kv(9, k))
         row.addStretch(1)   # 让按钮组水平居中
         self.toggle_btn = QPushButton("开始")
         self.reset_btn = QPushButton("重置")
@@ -392,7 +389,7 @@ class PomodoroCard(QWidget):
         _mf = QFont("Microsoft YaHei")
         _mf.setPointSizeF(10 * k)
         self.mode_label.setFont(_mf)
-        self.mode_label.setStyleSheet(_kq("color:#a8e6a3;font-size:10px;", k))
+        self.mode_label.setStyleSheet(_kq("color:#a8e6a3;font-size:15px;", k))
         row.addWidget(self.mode_label)
         row.addStretch(1)   # 右侧对称拉伸，按钮组居中
         lay.addLayout(row)
@@ -452,8 +449,8 @@ class PomodoroCard(QWidget):
                 else ("休息 %02d:%02d" % (m, s)))
             self.mode_label.setText("工作" if mode == "work" else "休息")
             self.mode_label.setStyleSheet(_kq(
-                "color:#a8e6a3;font-size:10px;" if mode == "work"
-                else "color:#ffd27d;font-size:10px;", self._k))
+                "color:#a8e6a3;font-size:15px;" if mode == "work"
+                else "color:#ffd27d;font-size:15px;", self._k))
         except Exception:
             pass
 
@@ -475,7 +472,7 @@ class CardHost(QScrollArea):
         self._container.setAutoFillBackground(False)
         self._lay = QVBoxLayout(self._container)
         self._lay.setContentsMargins(0, 0, 0, 0)
-        self._lay.setSpacing(_kv(4, k))
+        self._lay.setSpacing(_kv(6, k))
         self.setWidget(self._container)
         self._cards = []
 
@@ -556,7 +553,7 @@ def result_cards(val, error=""):
     if _IMG_RE.search(s):
         # 图片链接：转成 <img> 嵌入 HTML 展示
         s = _IMG_RE.sub(lambda m: "<img src='%s' width='%d'/>"
-                        % (m.group(0), _kv(150, _default_k())), s)
+                        % (m.group(0), _kv(225, _default_k())), s)
     if _HTML_RE.search(s):
         cards.append(H5Card(kind="html", title="结果", html=s))
     else:
@@ -580,15 +577,15 @@ class ResultView(QWidget):
             self.setFixedSize(pin_size)
         self.setStyleSheet("background:transparent;")
         lay = QVBoxLayout(self)
-        m = _kv(3, k)
+        m = _kv(4.5, k)
         lay.setContentsMargins(m, m, m, m)
-        lay.setSpacing(_kv(2, k))
+        lay.setSpacing(_kv(3, k))
         self.host = CardHost(self, k=k)
         lay.addWidget(self.host, 1)
         self.placeholder = QLabel("测试窗口")
         self.placeholder.setAlignment(Qt.AlignCenter)
         self.placeholder.setStyleSheet(_kq(
-            "color:#aab3c5;font-size:10px;border:none;background:transparent;", k))
+            "color:#aab3c5;font-size:15px;border:none;background:transparent;", k))
         lay.addWidget(self.placeholder)
 
     def paintEvent(self, event):
@@ -621,7 +618,7 @@ class ResultView(QWidget):
         if self._pin_size is None:
             try:
                 # 恢复灵活高度（显示文本结果时测试区可再拉伸）
-                self.setMinimumHeight(_kv(80, self._k))
+                self.setMinimumHeight(_kv(120, self._k))
                 self.setMaximumHeight(16777215)
             except Exception:
                 pass
@@ -662,7 +659,7 @@ class ResultView(QWidget):
         self.placeholder.show()
         if self._pin_size is None:
             try:
-                self.setMinimumHeight(_kv(80, self._k))
+                self.setMinimumHeight(_kv(120, self._k))
                 self.setMaximumHeight(16777215)
             except Exception:
                 pass

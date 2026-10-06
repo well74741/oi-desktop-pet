@@ -185,6 +185,48 @@ try:
 except Exception:
     pass
 app.processEvents()
+
+# ---------- 1.5 烘焙的一次性迁移：只许迁移一次，且只迁移文件里真有的键 ----------
+# v0.9.42 把界面基准倍率 1.5 烘进了源码，pet_size / button_size 从此存"最终像素"。
+# 旧配置存的是乘 1.5 之前的值（75 / 25），靠 ui_px_baked 这个标记迁移一次。
+# 这里守三条，每一条都对应一个真出过的错法：
+#   1) 老配置（有 pet_size、没标记）→ 75 要变成 112.5；
+#   2) 新配置（有标记）→ 一个字都不许再动，否则每次启动桌宠都大 1.5 倍；
+#   3) 配置文件存在但**缺** pet_size → 不许拿默认值再乘一遍
+#      （原来的写法会把已经烘好的 112.5 乘成 168.75，桌宠凭空大一圈）。
+import json as _json                                          # noqa: E402
+
+_cfg = G.get_config_path()
+
+
+def _write_cfg(d):
+    with open(_cfg, "w", encoding="utf-8") as f:
+        _json.dump(d, f)
+
+
+_write_cfg({"pet_size": 75, "button_size": 25})
+_m = G.load_settings()
+check("1.5 迁移：老配置的 pet_size 75 → 112.5、button_size 25 → 37.5",
+      abs(float(_m["pet_size"]) - 112.5) < 1e-9
+      and abs(float(_m["button_size"]) - 37.5) < 1e-9,
+      "pet_size=%s button_size=%s" % (_m["pet_size"], _m["button_size"]))
+check("1.5 迁移：迁移完会打上 ui_px_baked 标记", _m.get("ui_px_baked") is True)
+
+_write_cfg({"pet_size": 112.5, "button_size": 37.5, "ui_px_baked": True})
+_m2 = G.load_settings()
+check("1.5 迁移：已迁移过的配置不再重复放大（否则每次启动都大一圈）",
+      abs(float(_m2["pet_size"]) - 112.5) < 1e-9
+      and abs(float(_m2["button_size"]) - 37.5) < 1e-9,
+      "pet_size=%s" % _m2["pet_size"])
+
+_write_cfg({"pet_opacity": 1.0})          # 文件在、但没存过 pet_size
+_m3 = G.load_settings()
+check("1.5 迁移：文件里没存 pet_size 时用默认值，不拿默认值再乘 1.5",
+      abs(float(_m3["pet_size"]) - 112.5) < 1e-9
+      and abs(float(_m3["button_size"]) - 37.5) < 1e-9,
+      "pet_size=%s button_size=%s" % (_m3["pet_size"], _m3["button_size"]))
+
+
 shutil.rmtree(SAND, ignore_errors=True)
 # ---------- 启动外部程序时不许把桌宠目录传下去 ----------
 # 这是"装新版报 DeleteFile failed; code 5"的**真正根因**：子进程继承 CWD，

@@ -400,14 +400,19 @@ from bubble_ui import _widget_height
 
 
 class FixedModule(QWidget):
-    FIX_H = 158
+    # 237 = 旧版写的 158 × 1.5。v0.9.42 把那一次 1.5 烘进了源码，组件的 FIX_H
+    # 存的就是最终像素，这里跟着改，否则 kit.bs(FIX_H) 会少放大一轮。
+    FIX_H = 237
 
 
 kit.set_bubble_scale(2.0)
 fixed = FixedModule()
-# 期望值 = 标准档像素 × 档位 × 界面基准倍率（kit.UI_BASE，默认 1.5）
+# 期望值 = 标准档像素 × 1.5 × 档位。
+# 这里的 1.5 是**历史基准倍率**：v0.9.42 之前它是运行时的 kit.UI_BASE，现在已经
+# 烘进源码里的每个基准值（气泡宽度 210→315 等）。下面各处仍按"标准档像素"写，
+# 所以要在这里补上这一次，才能和 kit.bs() 的结果对齐。
 def _x(v, lvl):
-    return max(1, int(round(v * lvl * kit.UI_BASE)))
+    return max(1, int(round(v * 1.5 * lvl)))
 
 
 check("FIX_H 框架统一放大", _widget_height(fixed, _x(210, 2.0)) == _x(158, 2.0))
@@ -457,8 +462,8 @@ for _sc in (1.0, 2.0):
 
     def _fit(panel, tag):
         h = panel.current_height()
-        panel.resize(kit.bs(210), h)
-        _host.resize(kit.bs(210), h)
+        panel.resize(kit.bs(315), h)
+        _host.resize(kit.bs(315), h)
         app.processEvents()
         worst = 0
         for w in (panel.collapsed_label, panel.input, panel.up_btn,
@@ -495,7 +500,7 @@ kit.set_bubble_scale(1.0)
 # 能守住），以及真实行几何：值区不超出卡片、标题与值同一条中线。
 for _sc in (1.0, 1.5, 2.0):
     kit.set_bubble_scale(_sc)
-    need = bubble_layout._font_h() + 2 * kit.bs(1)
+    need = bubble_layout._font_h() + 2 * kit.bs(1.5)
     check("行高(x%s)：容得下一行字加卡片内边距（%d <= %d）"
           % (_sc, need, kit.row_height()), need <= kit.row_height())
     _h2 = QWidget()

@@ -108,7 +108,7 @@ class _StatBar(QWidget):
         self._hover = -1
         self._unit = ""
         self.setMouseTracking(True)
-        self.setFixedHeight(kit.bs(44))
+        self.setFixedHeight(kit.bs(66))
 
     def set_data(self, hourly, unit=""):
         self._hourly = list(hourly or [0] * 24)
@@ -161,7 +161,7 @@ class _StatBar(QWidget):
         mx = max(self._hourly) if self._hourly else 0
         if mx <= 0:
             p.setPen(QColor(150, 170, 205))
-            p.setFont(kit.font_pt(8))
+            p.setFont(kit.font_pt(12))
             p.drawText(self.rect(), Qt.AlignCenter, "今日暂无数据")
             return
         bw = max(2, int(w / 24) - 2)
@@ -178,7 +178,7 @@ class _StatBar(QWidget):
                 p.drawRect(x, y, bw, bh)
             if i % 6 == 0:
                 p.setPen(QColor(120, 135, 165))
-                p.setFont(kit.font_pt(6))
+                p.setFont(kit.font_pt(9))
                 p.drawText(x, h - 4, str(i))
         p.end()
 
@@ -188,7 +188,7 @@ class _StatBar(QWidget):
 class Widget(ModuleWidget):
     """通用统计表：单行（当前值 + 刷新 + 展开），展开显示 24 小时柱状图。"""
 
-    FIX_H = 15
+    FIX_H = 22.5
     def __init__(self, parent=None):
         super().__init__(parent)
         self._collapsed = True
@@ -212,7 +212,7 @@ class Widget(ModuleWidget):
         self._expand = QWidget(self)
         el = QVBoxLayout(self._expand)
         el.setContentsMargins(0, 0, 0, kit.bs(0))
-        el.setSpacing(kit.bs(2))
+        el.setSpacing(kit.bs(3))
         self._chart = _StatBar(self._expand)
         el.addWidget(self._chart)
         self._desc = kit.caption("", wrap=True)
@@ -229,8 +229,8 @@ class Widget(ModuleWidget):
     def current_height(self):
         if self._collapsed:
             return kit.row_height()
-        return (kit.header_row_height(True) + kit.bs(2) + kit.bs(74)
-                + kit.bs(2) + kit.caption_height())
+        return (kit.header_row_height(True) + kit.bs(3) + kit.bs(111)
+                + kit.bs(3) + kit.caption_height())
 
     def _toggle_fold(self):
         self._collapsed = not self._collapsed

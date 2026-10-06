@@ -312,25 +312,25 @@ class SiteManagerDialog(kit.DarkDialog):
         super().__init__("聚合AI · 站点管理", parent)
         import webchat_launcher as L
         self._L = L
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(630)
         lay = QVBoxLayout(self.body)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(21, 18, 21, 18)
+        lay.setSpacing(12)
 
         tip = QLabel("列表顺序就是菜单与侧边栏的顺序。网址填该站点的聊天页面地址。")
-        tip.setStyleSheet("color:#aab3c5;font-size:11px;")
+        tip.setStyleSheet("color:#aab3c5;font-size:16px;")
         tip.setWordWrap(True)
         lay.addWidget(tip)
 
         body = QHBoxLayout()
-        body.setSpacing(8)
+        body.setSpacing(12)
         self.listw = QListWidget()
-        self.listw.setMinimumHeight(190)
+        self.listw.setMinimumHeight(285)
         self.listw.currentRowChanged.connect(self._on_select)
         body.addWidget(self.listw, 1)
 
         side = QVBoxLayout()
-        side.setSpacing(6)
+        side.setSpacing(9)
         for text, slot in (("上移", lambda: self._move(-1)),
                            ("下移", lambda: self._move(1)),
                            ("删除", self._remove)):
@@ -343,7 +343,7 @@ class SiteManagerDialog(kit.DarkDialog):
         lay.addLayout(body)
 
         form = QHBoxLayout()
-        form.setSpacing(6)
+        form.setSpacing(9)
         form.addWidget(QLabel("名称"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("如：DeepSeek")
@@ -351,7 +351,7 @@ class SiteManagerDialog(kit.DarkDialog):
         lay.addLayout(form)
 
         form2 = QHBoxLayout()
-        form2.setSpacing(6)
+        form2.setSpacing(9)
         form2.addWidget(QLabel("网址"))
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("https://chat.example.com")
@@ -359,7 +359,7 @@ class SiteManagerDialog(kit.DarkDialog):
         lay.addLayout(form2)
 
         btns = QHBoxLayout()
-        btns.setSpacing(6)
+        btns.setSpacing(9)
         # 「添加」与「保存修改」分开：合成一个按钮时，只要列表里选中了某行就会
         # 变成覆盖那一行，看着像添加、其实把已有站点改掉了。
         add = QPushButton("添加")
@@ -478,24 +478,24 @@ class SiteManagerDialog(kit.DarkDialog):
 # 网页是子窗口，移动/缩放由系统同步，零延迟；任务栏只有一个窗口。
 
 _TILE_QSS = (
-    "QPushButton{border:1px solid rgba(255,255,255,26);border-radius:6px;"
-    "background:rgba(255,255,255,14);color:#cfd6e6;font-size:13px;"
+    "QPushButton{border:2px solid rgba(255,255,255,26);border-radius:9px;"
+    "background:rgba(255,255,255,14);color:#cfd6e6;font-size:20px;"
     "font-weight:bold;}"
     "QPushButton:hover{background:rgba(116,164,255,60);border-color:#7db6ff;}"
     "QPushButton:pressed{background:rgba(74,144,226,120);}"
 )
 
 _ACTIVE_QSS = (
-    "QPushButton{border:1px solid #7db6ff;border-radius:6px;"
-    "background:rgba(74,144,226,150);color:#ffffff;font-size:13px;"
+    "QPushButton{border:2px solid #7db6ff;border-radius:9px;"
+    "background:rgba(74,144,226,150);color:#ffffff;font-size:20px;"
     "font-weight:bold;}"
 )
 
 _MINI_QSS = (
     "QPushButton{border:none;background:transparent;color:#9fb0cc;"
-    "font-size:13px;}"
+    "font-size:20px;}"
     "QPushButton:hover{color:#ffffff;background:rgba(255,255,255,22);"
-    "border-radius:5px;}"
+    "border-radius:8px;}"
 )
 
 
@@ -506,8 +506,8 @@ class WebChatSidebar(QWidget):
     Win32、没有收起：位置由布局管，换站点点方块。
     """
 
-    PANEL_W = 42       # 栏宽（逻辑像素，未乘界面基准倍率）
-    TILE = 30          # 方块按钮边长
+    PANEL_W = 63       # 栏宽（逻辑像素，未乘界面基准倍率）
+    TILE = 45          # 方块按钮边长
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -520,8 +520,8 @@ class WebChatSidebar(QWidget):
         self._active = None
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(kit.ui(6), kit.ui(6), kit.ui(6), kit.ui(6))
-        lay.setSpacing(kit.ui(5))
+        lay.setContentsMargins(kit.ui(9), kit.ui(9), kit.ui(9), kit.ui(9))
+        lay.setSpacing(kit.ui(8))
 
         # 站点多过窗口高度时可以滚（滚动条隐藏，滚轮/拖动都能用）
         self._scroll = QScrollArea(self)
@@ -534,7 +534,7 @@ class WebChatSidebar(QWidget):
         holder = QWidget()
         self._tiles_lay = QVBoxLayout(holder)
         self._tiles_lay.setContentsMargins(0, 0, 0, 0)
-        self._tiles_lay.setSpacing(kit.ui(5))
+        self._tiles_lay.setSpacing(kit.ui(8))
         self._tiles_lay.addStretch(1)
         self._scroll.setWidget(holder)
         lay.addWidget(self._scroll, 1)
@@ -550,7 +550,7 @@ class WebChatSidebar(QWidget):
         b = QPushButton(text, self)
         b.setToolTip(tip)
         b.setCursor(Qt.PointingHandCursor)
-        b.setFixedSize(kit.ui(self.TILE), kit.ui(22))
+        b.setFixedSize(kit.ui(self.TILE), kit.ui(33))
         b.setStyleSheet(kit.ui_qss(_MINI_QSS))
         b.clicked.connect(slot)
         return b
@@ -673,24 +673,24 @@ class _Holder(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         cx, cy = self.width() // 2, self.height() // 2
-        r = kit.ui(13)
+        r = kit.ui(20)
         # 12 格转圈：当前相位最亮，往回依次变暗
         for i in range(12):
             a = 40 + int(200 * (((i - self._phase) % 12) / 11.0))
             p.save()
-            p.translate(cx, cy - kit.ui(14))
+            p.translate(cx, cy - kit.ui(21))
             p.rotate(i * 30)
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(140, 180, 240, 255 - a))
-            p.drawRoundedRect(-kit.ui(1), -r - kit.ui(5),
-                              kit.ui(2), kit.ui(5), kit.ui(1), kit.ui(1))
+            p.drawRoundedRect(-kit.ui(2), -r - kit.ui(8),
+                              kit.ui(3), kit.ui(8), kit.ui(2), kit.ui(2))
             p.restore()
         f = p.font()
         f.setFamily("Microsoft YaHei")
-        f.setPixelSize(kit.ui(12))
+        f.setPixelSize(kit.ui(18))
         p.setFont(f)
         p.setPen(QColor(150, 167, 196))
-        p.drawText(0, cy + kit.ui(14), self.width(), kit.ui(20),
+        p.drawText(0, cy + kit.ui(21), self.width(), kit.ui(30),
                    Qt.AlignHCenter | Qt.AlignTop,
                    "正在打开 %s…" % self._loading)
         p.end()
@@ -716,7 +716,7 @@ class WebChatHost(QWidget):
         self._pages = set()        # 已经嵌进容器的所有网页窗口（其余是藏着的）
         self._title = ""
         self.setWindowTitle("聚合AI")
-        self.setMinimumSize(kit.ui(360), kit.ui(260))
+        self.setMinimumSize(kit.ui(540), kit.ui(390))
         try:
             self.setWindowIcon(QApplication.windowIcon())
         except Exception:

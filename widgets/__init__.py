@@ -47,7 +47,7 @@ class ModuleWidget(QWidget):
         """默认把 FIX_H 当作标准档逻辑高度；可折叠组件应覆盖此方法。"""
         if int(getattr(self, "FIX_H", 0) or 0) > 0:
             from widgets import kit
-            return kit.bs(int(self.FIX_H))
+            return kit.bs(self.FIX_H)
         return 0
 
     def render(self, state, value):
@@ -57,15 +57,15 @@ class ModuleWidget(QWidget):
 
 # 组件通用基础样式：与气泡/卡片风格统一（滚动条等），加载时自动并入每个组件
 BASE_MODULE_QSS = (
-    "QScrollBar:vertical{background:transparent;width:6px;margin:0;border:none;}"
-    "QScrollBar::handle:vertical{background:rgba(255,255,255,60);border-radius:3px;"
-    "min-height:18px;margin:1px;}"
+    "QScrollBar:vertical{background:transparent;width:9px;margin:0;border:none;}"
+    "QScrollBar::handle:vertical{background:rgba(255,255,255,60);border-radius:4.5px;"
+    "min-height:27px;margin:1.5px;}"
     "QScrollBar::handle:vertical:hover{background:rgba(255,255,255,110);}"
     "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
     "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
-    "QScrollBar:horizontal{background:transparent;height:6px;margin:0;border:none;}"
-    "QScrollBar::handle:horizontal{background:rgba(255,255,255,60);border-radius:3px;"
-    "min-width:18px;margin:1px;}"
+    "QScrollBar:horizontal{background:transparent;height:9px;margin:0;border:none;}"
+    "QScrollBar::handle:horizontal{background:rgba(255,255,255,60);border-radius:4.5px;"
+    "min-width:27px;margin:1.5px;}"
     "QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0;}"
     "QListWidget{background:transparent;border:none;}"
 )

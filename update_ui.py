@@ -62,41 +62,45 @@ class UpdateDialog(kit.DarkDialog):
         lay = QVBoxLayout(self.body)
         # 这里写的都是逻辑尺寸：窗口显示时界面缩放（kit.install_ui_zoom）会统一放大。
         # 以前每个数又先乘了一遍 kit.ui()，等于放大两次 —— 380 宽的窗口实际 855。
-        lay.setContentsMargins(12, 10, 12, 10)
-        lay.setSpacing(6)
+        lay.setContentsMargins(18, 15, 18, 15)
+        lay.setSpacing(9)
         self.status = QLabel("")
         self.status.setWordWrap(True)
         self.status.setStyleSheet(
-            "color:#dfe6f2;font-size:12px;font-family:%s;" % kit._FONT)
+            "color:#dfe6f2;font-size:18px;font-family:%s;" % kit._FONT)
         lay.addWidget(self.status)
         self.notes = QTextBrowser()
         self.notes.setOpenExternalLinks(True)
-        self.notes.setMaximumHeight(170)
+        self.notes.setMaximumHeight(255)
         self.notes.setStyleSheet(
-            "QTextBrowser{background:#161b25;color:#c7d0e0;border:1px solid #39414f;"
-            "border-radius:6px;padding:4px;font-size:11px;font-family:%s;}" % kit._FONT)
+            "QTextBrowser{background:#161b25;color:#c7d0e0;border:2px solid #39414f;"
+            "border-radius:9px;padding:6px;font-size:16px;font-family:%s;}" % kit._FONT)
         self.notes.hide()
         lay.addWidget(self.notes)
-        self.bar = kit.progress(0, 100, height=8)
-        self.bar.setFixedHeight(6)        # kit.progress 按气泡档位算的，这里是窗口
+        self.bar = kit.progress(0, 100, height=12)
+        self.bar.setFixedHeight(9)        # kit.progress 按气泡档位算的，这里是窗口
         self.bar.setStyleSheet(
-            "QProgressBar{background:rgba(255,255,255,25);border:none;border-radius:3px;}"
+            "QProgressBar{background:rgba(255,255,255,25);border:none;border-radius:4px;}"
             "QProgressBar::chunk{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #4a90e2,stop:1 #2fb8c0);border-radius:3px;}")
+            "stop:0 #4a90e2,stop:1 #2fb8c0);border-radius:4px;}")
         self.bar.hide()
         lay.addWidget(self.bar)
         self.detail = QLabel("")
         self.detail.setStyleSheet(
-            "color:#8a95a8;font-size:11px;font-family:%s;" % kit._FONT)
+            "color:#8a95a8;font-size:16px;font-family:%s;" % kit._FONT)
         self.detail.hide()
         lay.addWidget(self.detail)
 
         row = QHBoxLayout()
+        # 6 而不是 9：旧版的整树放大有个"继承判定"——子布局的间距和父布局相等就
+        # 当成"没显式设过"而跳过。这一行恰好和外层 lay 都写了 6，于是被判成继承、
+        # 一直没被放大。按钮行实测宽度照旧（放大会多出 3 个间距 × 3px = 9px，
+        # 挤得勾选框少 2px、标题多折一行）。
         row.setSpacing(6)
         self.auto_cb = QCheckBox("自动检查更新")
         self.auto_cb.setToolTip("启动后和每隔 6 小时自动检查一次，有新版本才提醒")
         self.auto_cb.setStyleSheet(
-            "QCheckBox{color:#aab3c5;font-size:11px;font-family:%s;}" % kit._FONT)
+            "QCheckBox{color:#aab3c5;font-size:16px;font-family:%s;}" % kit._FONT)
         self.auto_cb.setChecked(bool(self._settings().get("update_auto", True)))
         self.auto_cb.toggled.connect(self._on_auto_toggled)
         row.addWidget(self.auto_cb)
@@ -104,7 +108,7 @@ class UpdateDialog(kit.DarkDialog):
         self._btns = []
         self._btn_row = row
         lay.addLayout(row)
-        self.setFixedWidth(340)
+        self.setFixedWidth(510)
 
         if info is None:
             self.check()
@@ -114,6 +118,20 @@ class UpdateDialog(kit.DarkDialog):
     def _z(self, v):
         """显示之后才设的尺寸：界面缩放已经做过，要自己换算。"""
         return kit.ui_i(v) if self.property("oiZ") else v
+
+    def showEvent(self, event):
+        """显示前先让样式落地、再量一次高度。
+
+        构造时 `_set_status` 已经 adjustSize 过一次，但那会儿样式表还没重新下发，
+        量到的是"半成品"高度（旧版 294，去掉整树放大后 298，两个都是过期值；
+        布局自己算出来的其实都是 293）。这里重下样式 + 再 adjustSize 一次，
+        高度就等于布局真正要的那个数，不再跟着"什么时候 polish"飘。
+        """
+        if not self.property("oiRestyled"):
+            self.setProperty("oiRestyled", True)      # DarkDialog 认这个标志，不会重复
+            kit.restyle(self)
+        self.adjustSize()
+        super().showEvent(event)
 
     # ---------- 设置读写 ----------
     def _settings(self):

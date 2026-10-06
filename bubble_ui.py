@@ -129,10 +129,10 @@ class _BubbleTip(QWidget):
             self._text = text
             try:
                 fm = QFontMetrics(self._font())
-                self.setFixedSize(fm.horizontalAdvance(text) + _bs(12), fm.height() + _bs(6))
+                self.setFixedSize(fm.horizontalAdvance(text) + _bs(18), fm.height() + _bs(9))
             except Exception:
-                self.resize(_bs(84), _bs(22))
-        self.move(gpos.x() - self.width() // 2, gpos.y() - self.height() - _bs(8))
+                self.resize(_bs(126), _bs(33))
+        self.move(gpos.x() - self.width() // 2, gpos.y() - self.height() - _bs(12))
         self.show()
         self.raise_()
         self._hide_timer.start(1500)   # 1.5 秒后自动消失
@@ -142,7 +142,7 @@ class _BubbleTip(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setBrush(QColor(255, 255, 255, 235))
         p.setPen(QPen(QColor(187, 187, 187, 220), 1))
-        p.drawRoundedRect(0, 0, self.width() - 1, self.height() - 1, _bs(6), _bs(6))
+        p.drawRoundedRect(0, 0, self.width() - 1, self.height() - 1, _bs(9), _bs(9))
         p.setPen(QColor(51, 51, 51))
         p.setFont(self._font())
         p.drawText(self.rect(), Qt.AlignCenter, self._text)
@@ -154,7 +154,7 @@ class _TrashIconButton(QPushButton):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(_bs(14), _bs(12))
+        self.setFixedSize(_bs(21), _bs(18))
         self.setCursor(Qt.PointingHandCursor)
 
     def paintEvent(self, event):
@@ -163,7 +163,7 @@ class _TrashIconButton(QPushButton):
         p.setRenderHint(QPainter.Antialiasing)
         c = QColor(200, 215, 240, 200)
         w, h = self.width(), self.height()
-        s = _bs(8)                               # 图案尺寸（随档位）
+        s = _bs(12)                               # 图案尺寸（随档位）
         x0 = (w - s) // 2
         y0 = (h - s) // 2
         p.setPen(QPen(c, 1))
@@ -177,7 +177,7 @@ class _ArrowButton(QPushButton):
 
     def __init__(self, direction, parent=None):
         super().__init__(parent)
-        self.setFixedSize(_bs(14), _bs(12))
+        self.setFixedSize(_bs(21), _bs(18))
         self.setCursor(Qt.PointingHandCursor)
         self._dir = "up" if direction == "up" else "down"
 
@@ -208,7 +208,7 @@ class _FoldButton(QPushButton):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(_bs(14), _bs(12))
+        self.setFixedSize(_bs(21), _bs(18))
         self._down = True
 
     def set_down(self, down):
@@ -264,7 +264,7 @@ class _ThumbStrip(QWidget):
         self._pixmaps = pms[:8]   # 最多显示 8 张，防止附件条被撑满
         if self._pixmaps:
             w = tw + max(0, len(self._pixmaps) - 1) * (tw - ov)
-            self.setFixedWidth(min(_bs(160), w))
+            self.setFixedWidth(min(_bs(240), w))
             self.show()
         else:
             self.setFixedWidth(0)
@@ -327,8 +327,8 @@ class _ChatInput(QTextEdit):
         try:
             txt_h = doc.documentLayout().documentSize().height()
         except Exception:
-            txt_h = _bs(17) * max(1, doc.blockCount())
-        h = min(_bs(44), max(_bs(26), int(round(txt_h)) + _bs(8)))
+            txt_h = _bs(25.5) * max(1, doc.blockCount())
+        h = min(_bs(66), max(_bs(39), int(round(txt_h)) + _bs(12)))
         self.setFixedHeight(h)
 
     def keyPressEvent(self, event):
@@ -362,9 +362,9 @@ class _ChatHistory(QTextBrowser):
     """对话历史框：拦截自定义 scheme 链接点击，避免 Qt 导航把文档清空。"""
 
     _MENU_QSS = (
-        "QMenu{background:#232a3a;border:1px solid #4a5468;border-radius:6px;"
-        "padding:3px;font-family:'Microsoft YaHei';font-size:11px;color:#d5dbe8;}"
-        "QMenu::item{padding:4px 18px;border-radius:3px;margin:0 1px;}"
+        "QMenu{background:#232a3a;border:1.5px solid #4a5468;border-radius:9px;"
+        "padding:4.5px;font-family:'Microsoft YaHei';font-size:16.5px;color:#d5dbe8;}"
+        "QMenu::item{padding:6px 27px;border-radius:4.5px;margin:0 1.5px;}"
         "QMenu::item:selected{background:#4a90e2;color:#ffffff;}"
         "QMenu::item:disabled{color:#566070;background:transparent;}"
     )
@@ -430,21 +430,21 @@ class ChatPanel(QWidget):
     _image_ready = pyqtSignal(object, object)   # (消息, 本地图片路径)：后台下载完成后投递到主线程
     _HIST_QSS = (
         "QTextBrowser{background:rgba(255,255,255,18);border:none;color:#e8ecf5;"
-        "padding:1px 2px;}"
-        "QScrollBar:vertical{background:transparent;width:4px;margin:0;}"
+        "padding:1.5px 3px;}"
+        "QScrollBar:vertical{background:transparent;width:6px;margin:0;}"
         "QScrollBar::handle:vertical{background:rgba(255,255,255,75);"
-        "border-radius:2px;min-height:16px;}"
+        "border-radius:3px;min-height:24px;}"
         "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
         "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
     )
     _FOLD_QSS = ("QPushButton{border:none;background:transparent;color:rgba(200,215,240,180);"
-                  "font-size:10px;padding:0;}"
-                  "QPushButton:hover{color:#ffffff;background:rgba(255,255,255,35);border-radius:3px;}"
+                  "font-size:15px;padding:0;}"
+                  "QPushButton:hover{color:#ffffff;background:rgba(255,255,255,35);border-radius:4.5px;}"
                   "QPushButton:disabled{color:rgba(200,215,240,55);background:transparent;}")
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._BASE_H = _bs(54)   # 输入区基准高度随气泡档位缩放（覆盖类常量）
+        self._BASE_H = _bs(81)   # 输入区基准高度随气泡档位缩放（覆盖类常量）
         self._fold_base = self._BASE_H   # 折叠动画期间恒定的"历史区以外"高度
         self.on_send = None
         self.on_stop = None
@@ -485,7 +485,7 @@ class ChatPanel(QWidget):
         self._save_timer.timeout.connect(self._save_history)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(_bs(1))
+        lay.setSpacing(_bs(1.5))
         self.history = _ChatHistory(self)
         self.history.setFrameShape(QTextBrowser.NoFrame)
         self.history.setStyleSheet(_scaled_qss(self._HIST_QSS))
@@ -496,7 +496,7 @@ class ChatPanel(QWidget):
             self.history.setFont(_hf)
         except Exception:
             pass
-        self.history.setMaximumHeight(_bs(150))
+        self.history.setMaximumHeight(_bs(225))
         self.history.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.history.setOpenExternalLinks(False)   # 统一走 mouseReleaseEvent/setSource（复制/外部链接）
         self.history.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -504,8 +504,8 @@ class ChatPanel(QWidget):
         # 折叠态：单行省略、上下居中显示最后一条消息
         self.collapsed_label = QLabel()
         self.collapsed_label.setStyleSheet(_scaled_qss(
-            "color:#e8ecf5;font-size:10px;background:rgba(255,255,255,18);"
-            "border:none;border-radius:4px;padding:1px 6px;"))
+            "color:#e8ecf5;font-size:15px;background:rgba(255,255,255,18);"
+            "border:none;border-radius:6px;padding:1.5px 9px;"))
         self.collapsed_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self.collapsed_label.hide()
         # 不给伸缩权：它只有一行字，拿了伸缩权就会把剩余空间全吃掉，
@@ -515,21 +515,21 @@ class ChatPanel(QWidget):
             from widgets import kit as _k
             self.collapsed_label.setFixedHeight(_k.row_height())
         except Exception:
-            self.collapsed_label.setFixedHeight(_bs(19))
+            self.collapsed_label.setFixedHeight(_bs(28.5))
         lay.addWidget(self.collapsed_label, 0)
         # 附件条：引用消息 / 待发送图片，右侧"发送"和"✕"
         self._quote_bar = QWidget(self)
         self._quote_bar.setStyleSheet(_scaled_qss(
-            "background:rgba(255,255,255,16);border-left:2px solid #7db6ff;"
-            "border-radius:3px;"))
+            "background:rgba(255,255,255,16);border-left:3px solid #7db6ff;"
+            "border-radius:4.5px;"))
         qb_lay = QHBoxLayout(self._quote_bar)
-        qb_lay.setContentsMargins(_bs(4), _bs(1), _bs(4), _bs(1))
-        qb_lay.setSpacing(_bs(4))
+        qb_lay.setContentsMargins(_bs(6), _bs(1.5), _bs(6), _bs(1.5))
+        qb_lay.setSpacing(_bs(6))
         self._thumb_strip = _ThumbStrip(self._quote_bar)
         qb_lay.addWidget(self._thumb_strip)
         self._quote_text = QLabel("", self._quote_bar)
         self._quote_text.setStyleSheet(_scaled_qss(
-            "color:#aab3c5;font-size:10px;border:none;background:transparent;"))
+            "color:#aab3c5;font-size:15px;border:none;background:transparent;"))
         self._quote_text.setWordWrap(True)
         qb_lay.addWidget(self._quote_text, 1)
         self._send_attach_btn = QPushButton("发送", self._quote_bar)
@@ -548,23 +548,23 @@ class ChatPanel(QWidget):
         # 会被裁掉——用户看到的"收纳后被裁切、右侧按钮没对齐"就是这个）。
         self._bottom = QWidget(self)
         row = QHBoxLayout(self._bottom)
-        row.setContentsMargins(0, 0, _bs(1), 0)   # 按钮尽量贴近右侧边框
-        row.setSpacing(_bs(4))
+        row.setContentsMargins(0, 0, _bs(1.5), 0)   # 按钮尽量贴近右侧边框
+        row.setSpacing(_bs(6))
         self.input = _ChatInput(self)
         self.input.setPlaceholderText("输入消息，Enter 发送…")
         self.input.submitted.connect(self._send)
         self.input.image_pasted.connect(self._add_pasted_image)
         self.input.setStyleSheet(_scaled_qss(
             "QTextEdit{background:rgba(255,255,255,30);"
-            "border:1px solid rgba(255,255,255,60);border-radius:4px;"
-            "color:#e8ecf5;padding:2px 6px;font-size:10px;}"))
+            "border:1.5px solid rgba(255,255,255,60);border-radius:6px;"
+            "color:#e8ecf5;padding:3px 9px;font-size:15px;}"))
         self.input.document().contentsChanged.connect(
             lambda: self.on_resize() if self.on_resize else None)
         row.addWidget(self.input, 1)
         # 2x2 按钮宫格：上/下条对话（第一行）、收纳/清屏（第二行），与输入框等高
         btn_col = QGridLayout()
         btn_col.setContentsMargins(0, 0, 0, 0)
-        btn_col.setSpacing(_bs(1))
+        btn_col.setSpacing(_bs(1.5))
         self.up_btn = _ArrowButton("up", self)
         self.up_btn.setStyleSheet(_scaled_qss(self._FOLD_QSS))
         self.up_btn.setCursor(Qt.PointingHandCursor)
@@ -593,8 +593,8 @@ class ChatPanel(QWidget):
         # 停止按钮：AI 回复/思考中可打断（类似网页输入框的停止）
         self._stop_btn = QPushButton("停止", self)
         self._stop_btn.setStyleSheet(_scaled_qss(
-            "QPushButton{border:none;border-radius:4px;padding:1px 6px;"
-            "font-size:10px;color:#ffe0e0;background:rgba(215,80,80,150);}"
+            "QPushButton{border:none;border-radius:6px;padding:1.5px 9px;"
+            "font-size:15px;color:#ffe0e0;background:rgba(215,80,80,150);}"
             "QPushButton:hover{background:rgba(235,105,105,200);}"
             "QPushButton:pressed{background:rgba(190,70,70,190);}"))
         self._stop_btn.setCursor(Qt.PointingHandCursor)
@@ -765,7 +765,7 @@ class ChatPanel(QWidget):
         lines = 0
         try:
             pw = self.parentWidget().width() if self.parentWidget() else self.width()
-            avail = max(_bs(60), pw - _bs(32))  # 消息可用宽度（扣除边距与滚动条）
+            avail = max(_bs(90), pw - _bs(48))  # 消息可用宽度（扣除边距与滚动条）
             f = QFont("Microsoft YaHei")
             f.setPointSizeF(7.5 * _kit_scale())
             fm = QFontMetrics(f)
@@ -777,7 +777,7 @@ class ChatPanel(QWidget):
                 lines += max(1, math.ceil(w / avail))
         except Exception:
             lines = 3
-        return min(_bs(150), max(1, min(10, lines)) * _bs(16))
+        return min(_bs(225), max(1, min(10, lines)) * _bs(24))
 
     def _base_h(self):
         """历史区**以外**的所有固定高度：标题栏 + 收起态单行 + 引用条 + 输入行。
@@ -823,7 +823,7 @@ class ChatPanel(QWidget):
         sp = self.layout().spacing()
         if self._streaming:
             # 流式期间预留最大高度，保持气泡尺寸稳定（输入区 + 150 历史区）
-            return base + sp + _bs(150)
+            return base + sp + _bs(225)
         if self._fold_anim is not None:
             # 折叠动画期间：返回动画中的外框高度。与 _fold_tick 用同一条曲线、
             # 同一对端点，保证"面板自报的高度"和"实际摆出来的几何"始终一致。
@@ -851,7 +851,7 @@ class ChatPanel(QWidget):
             # 摘要行**不在这里 hide**：它的高度由动画从满收到 0（见
             # _start_hist_anim），收完了才在 _finish_fold 里真正藏掉。
             self.history.show()
-            self.history.setMaximumHeight(_bs(150))
+            self.history.setMaximumHeight(_bs(225))
             self.history.setFixedHeight(0)
             self.layout().setAlignment(self.history, Qt.AlignBottom)
             self._capture_fold_anchor()
@@ -882,7 +882,7 @@ class ChatPanel(QWidget):
         try:
             return int(_k.row_height())
         except Exception:
-            return _bs(19)
+            return _bs(28.5)
 
     def _start_hist_anim(self, h0, h1, total0=None):
         """历史区 h0->h1 的折叠动画。
@@ -949,7 +949,7 @@ class ChatPanel(QWidget):
         """动画结束：恢复正常布局并让外层做最后一次尺寸同步。"""
         try:
             self.layout().setAlignment(self.history, Qt.Alignment())   # 恢复默认填充
-            self.history.setMaximumHeight(_bs(16) if self._collapsed else _bs(150))
+            self.history.setMaximumHeight(_bs(24) if self._collapsed else _bs(225))
             self.history.setFixedHeight(16777215)   # 解除固定，交给外层布局
             # 摘要行的高度在动画里被逐帧改过，收尾要还原成正常的一行高
             self.collapsed_label.setFixedHeight(self._collapsed_label_full_h())
@@ -1052,7 +1052,7 @@ class ChatPanel(QWidget):
         # 气泡放大档位下那个常数会偏小，文字被提前截断
         avail = self.collapsed_label.contentsRect().width()
         if avail <= 0:
-            avail = max(20, self.width() - _bs(16))
+            avail = max(20, self.width() - _bs(24))
         self.collapsed_label.setText(fm.elidedText(txt, Qt.ElideRight,
                                                    max(20, avail)))
         self.collapsed_label.setToolTip(txt)
@@ -1077,8 +1077,8 @@ class ChatPanel(QWidget):
                 self._header_widget.deleteLater()
             self._header_widget = QWidget(self)
             h = QHBoxLayout(self._header_widget)
-            h.setContentsMargins(_bs(4), 0, _bs(4), 0)
-            h.setSpacing(_bs(4))
+            h.setContentsMargins(_bs(6), 0, _bs(6), 0)
+            h.setSpacing(_bs(6))
             # 标题栏高度按统一行高（kit.row_height 已含 CJK 行距余量）：
             # 原先只给 2px/1px 内边距、标签无最小高度，中文标题底部会被裁掉一点。
             try:
@@ -1088,15 +1088,15 @@ class ChatPanel(QWidget):
                 pass
             t = QLabel(str(title or "网页聊天"), self._header_widget)
             t.setStyleSheet(_scaled_qss(
-                "color:#a8e6a3;font-size:10px;font-weight:600;"
+                "color:#a8e6a3;font-size:15px;font-weight:600;"
                 "background:transparent;border:none;"))
             t.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             h.addWidget(t, 1)
             if url:
                 b = QPushButton("进入网页", self._header_widget)
                 b.setStyleSheet(_scaled_qss(
-                    "QPushButton{border:none;border-radius:4px;padding:1px 8px;"
-                    "font-size:10px;color:#e8ecf5;background:rgba(255,255,255,35);}"
+                    "QPushButton{border:none;border-radius:6px;padding:1.5px 12px;"
+                    "font-size:15px;color:#e8ecf5;background:rgba(255,255,255,35);}"
                     "QPushButton:hover{background:rgba(74,144,226,140);}"))
                 b.setCursor(Qt.PointingHandCursor)
                 if open_cb:
@@ -1107,7 +1107,7 @@ class ChatPanel(QWidget):
             elif right_text:
                 m = QLabel(str(right_text), self._header_widget)
                 m.setStyleSheet(_scaled_qss(
-                    "color:#8fa3c0;font-size:10px;background:transparent;"
+                    "color:#8fa3c0;font-size:15px;background:transparent;"
                     "border:none;"))
                 m.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 h.addWidget(m)
@@ -1529,20 +1529,20 @@ class ChatPanel(QWidget):
             self.history.show()
         # 字体由历史框的 QFont 回退链负责（Qt 富文本的 CSS font-family 只取第一个，
         # 无法逐字回退特殊符号；用 setFamilies 才能让 ①②③ 等符号走覆盖它的字体）
-        parts = ["<div style='font-size:10px;line-height:130%;'>"]
+        parts = ["<div style='font-size:15px;line-height:130%;'>"]
         if not msgs and not self._streaming and not self._thinking_text:
             # 空会话占位提示：切换/新建会话时能看出跳到了哪里
-            parts.append("<div style='color:#6f7d96;font-size:10px;'>"
+            parts.append("<div style='color:#6f7d96;font-size:15px;'>"
                          "（新对话，开始输入吧）</div>")
-        img_w = max(_bs(60), min(_bs(150), self.width() - _bs(28)))   # 图片宽度随窗口自适应
+        img_w = max(_bs(90), min(_bs(225), self.width() - _bs(42)))   # 图片宽度随窗口自适应
         for mi, m in enumerate(msgs):
             if m["role"] == "user":
                 color = "#4da3ff"
                 label = "你"
             elif m["role"] == "tool":
                 # 工具执行步骤：灰色小字，不参与引用/复制，仅作过程展示
-                parts.append("<div style='color:#7f8ea8;font-size:10px;"
-                             "line-height:13px;'>%s</div>"
+                parts.append("<div style='color:#7f8ea8;font-size:15px;"
+                             "line-height:19.5px;'>%s</div>"
                              % _html.escape(str(m.get("text", ""))))
                 continue
             else:
@@ -1568,7 +1568,7 @@ class ChatPanel(QWidget):
             # 思考过程：淡色、可折叠（只显示摘要行 + 展开全文）
             shown = self._thinking_text if len(self._thinking_text) <= 120 \
                 else self._thinking_text[:117] + "…"
-            parts.append("<div style='color:#8fa3c0;font-size:10px;'>"
+            parts.append("<div style='color:#8fa3c0;font-size:15px;'>"
                          "<a href='thinktoggle://' style='color:#8fa3c0;'>"
                          "▸ 思考：%s</a></div>" % _html.escape(shown))
         if self._streaming:
@@ -1589,7 +1589,7 @@ class ChatPanel(QWidget):
                                  % _chat_html(head, self._code_blocks,
                                               collapse_long=True,
                                               expanded=(), allow_expand=False))
-                    parts.append("<div style='color:#6f7d96;font-size:10px;'>"
+                    parts.append("<div style='color:#6f7d96;font-size:15px;'>"
                                  "… 已输出 %d 字符（生成中，完成后显示完整内容）</div>" % total)
                 else:
                     parts.append("<div><span style='color:#a8e6a3;font-weight:600;'>AI：</span>%s"
@@ -1697,15 +1697,20 @@ def _tool_step_text(name, args, result):
 
 
 def _html_scale(s):
-    """把富文本 HTML 里的 font-size/line-height:Npx 按气泡档位整体放大（根因统一，不逐个改）。"""
+    """把富文本 HTML 里的 font-size/line-height:Npx 按气泡档位整体放大（根因统一，不逐个改）。
+
+    注意两点，改之前先看懂：
+      * 只认 font-size / line-height。border/padding/border-radius 从来不走这里，
+        所以那些数值就是最终像素，别去乘。
+      * 即使档位是 1.0 也要过一遍正则：基准值里有 19.5px 这种精确半像素
+        （源于"旧版乘 1.5"的烘焙结果），直接交给 Qt 富文本会被截断成 19。
+    """
     try:
         from widgets import kit as _kit
         k = _kit.bubble_k()
     except Exception:
         k = 1.0
-    if k <= 1.0:
-        return s
-    return re.sub(r"(font-size|line-height)\s*:\s*(\d+)px",
+    return re.sub(r"(font-size|line-height)\s*:\s*(\d+(?:\.\d+)?)px",
                   lambda m: "%s:%dpx" % (m.group(1),
                                          max(1, int(round(float(m.group(2)) * k)))),
                   s)
@@ -1748,12 +1753,12 @@ def _chat_html(text, code_blocks=None, collapse_long=False, expanded=None,
                                 "<div style='text-align:right;padding:1px 3px;'>"
                                 "<a href='copy:%d' style='color:#7db6ff;"
                                 "border:1px solid rgba(125,182,255,120);border-radius:3px;"
-                                "padding:0 5px;font-size:10px;text-decoration:none;'>⧉</a></div>"
+                                "padding:0 5px;font-size:15px;text-decoration:none;'>⧉</a></div>"
                                 "<pre style='margin:0;padding:2px 4px;white-space:pre-wrap;"
-                                "font-family:Consolas,monospace;font-size:10px;"
+                                "font-family:Consolas,monospace;font-size:15px;"
                                 "color:#b8e0a8;'>%s</pre>"
                                 "</td></tr></table>"
-                                "<div style='text-align:center;padding:1px;font-size:10px;"
+                                "<div style='text-align:center;padding:1px;font-size:15px;"
                                 "color:#8fa3c0;'>共 %d 行 %s</div>"
                                 % (idx, _html.escape(shown), n, btn))
                     elif collapse_long and n > 10:
@@ -1764,12 +1769,12 @@ def _chat_html(text, code_blocks=None, collapse_long=False, expanded=None,
                                 "<div style='text-align:right;padding:1px 3px;'>"
                                 "<a href='copy:%d' style='color:#7db6ff;"
                                 "border:1px solid rgba(125,182,255,120);border-radius:3px;"
-                                "padding:0 5px;font-size:10px;text-decoration:none;'>⧉</a></div>"
+                                "padding:0 5px;font-size:15px;text-decoration:none;'>⧉</a></div>"
                                 "<pre style='margin:0;padding:2px 4px;white-space:pre-wrap;"
-                                "font-family:Consolas,monospace;font-size:10px;"
+                                "font-family:Consolas,monospace;font-size:15px;"
                                 "color:#b8e0a8;'>%s</pre>"
                                 "</td></tr></table>"
-                                "<div style='text-align:center;padding:1px;font-size:10px;'>"
+                                "<div style='text-align:center;padding:1px;font-size:15px;'>"
                                 "<a href='collapsecode:%d' style='color:#8fa3c0;'>收起</a></div>"
                                 % (idx, _html.escape(code), idx))
                     else:
@@ -1781,10 +1786,10 @@ def _chat_html(text, code_blocks=None, collapse_long=False, expanded=None,
                                 "<div style='text-align:right;padding:1px 3px;'>"
                                 "<a href='copy:%d' style='color:#7db6ff;"
                                 "border:1px solid rgba(125,182,255,120);border-radius:3px;"
-                                "padding:0 5px;font-size:10px;text-decoration:none;'>⧉</a></div>"
+                                "padding:0 5px;font-size:15px;text-decoration:none;'>⧉</a></div>"
                                 "<pre style='margin:0;padding:2px 4px;white-space:pre-wrap;"
                                 "font-family:Consolas,monospace;"
-                                "font-size:10px;color:#b8e0a8;'>%s</pre>"
+                                "font-size:15px;color:#b8e0a8;'>%s</pre>"
                                 "</td></tr></table>"
                                 % (idx, _html.escape(code)))
                 except Exception:
@@ -1801,7 +1806,7 @@ def _chat_html_inline(seg):
     s = _html.escape(seg)
     s = re.sub(r"`([^`]+)`",
                lambda m: ("<code style='background:rgba(255,255,255,25);border-radius:3px;"
-                          "padding:0 3px;font-family:Consolas,monospace;font-size:10px;"
+                          "padding:0 3px;font-family:Consolas,monospace;font-size:15px;"
                           "color:#f0e68c;'>%s</code>" % m.group(1)), s)
     s = _LINK_RE.sub(lambda m: '<a href="%s">%s</a>' % (m.group(0), m.group(0)), s)
     s = s.replace("\n", "<br>")
@@ -1920,8 +1925,8 @@ def _style_module_widget(w):
         qss = w.styleSheet() or ""
         if "moduleCard" not in qss:
             w.setStyleSheet(qss + "\n#moduleCard{"
-                            "border:1px solid rgba(255,255,255,42);"
-                            "border-radius:5px;background:rgba(255,255,255,11);}")
+                            "border:1.5px solid rgba(255,255,255,42);"
+                            "border-radius:7.5px;background:rgba(255,255,255,11);}")
     except Exception:
         pass
 
@@ -2002,7 +2007,7 @@ class StatusBubble(QWidget):
     _ROW_H = 15
     _ROW_TITLE_H = 15  # 组件行标题栏高度（对话面板自带标题栏，不占此高）
     _HEAD_H = 20
-    _FIX_W = 210    # 气泡固定宽度：内容不会把气泡撑大
+    _FIX_W = 315    # 气泡固定宽度：内容不会把气泡撑大
     _rule_done = pyqtSignal(str, str)  # 后台规则线程完成 (name, text)
     _chat_done = pyqtSignal(str, str)  # 对话回复完成 (name, text)
     _chat_chunk = pyqtSignal(str, str) # 流式对话增量 (name, 累计文本)
@@ -2010,8 +2015,8 @@ class StatusBubble(QWidget):
     _chat_status = pyqtSignal(str, str) # 连接/接收状态 (name, 状态文本)
     _tool_step = pyqtSignal(str, str)   # 工具执行步骤可视化 (name, 步骤文本)
     _btn_qss = ("QPushButton{border:none;background:transparent;color:rgba(200,215,240,190);"
-                "font-size:10px;padding:0;} QPushButton:hover{color:#ffffff;"
-                "background:rgba(255,255,255,40);border-radius:3px;}")
+                "font-size:15px;padding:0;} QPushButton:hover{color:#ffffff;"
+                "background:rgba(255,255,255,40);border-radius:4.5px;}")
 
     def __init__(self, pet_widget):
         super().__init__(None)
@@ -2028,7 +2033,7 @@ class StatusBubble(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setMouseTracking(True)
         self._font = QFont("Microsoft YaHei")
-        self._font.setPointSizeF(7.5 * _kit.bubble_k())  # 与对话文字大小一致
+        self._font.setPointSizeF(11.25 * _kit.bubble_k())  # 与对话文字大小一致
         self._rows = []       # [(title, lines, row_h)]（lines 为 [(text, url), ...]）
         self._raw_rows = []   # 原始行 [(title, value)]
         self._disp_rows = []  # 实际显示行 (title, value, widget)，布局的输入
@@ -2055,7 +2060,7 @@ class StatusBubble(QWidget):
         self._err_notified = set()                   # 已提示过错误的规则
         self._link_hits = []
         self._agent_map = {}   # 行标题 -> 智能体规则（供审批按钮）
-        self._title_w = _kit.bs(44)   # 标题列宽随气泡档位缩放（值区宽度按它扣除）
+        self._title_w = _kit.bs(66)   # 标题列宽随气泡档位缩放（值区宽度按它扣除）
         self._full_h = 120
         self._cached_pm = None   # 内容缓存位图（弹出动画平滑）
         self._pending_titles = set()  # 正在加载/思考中，显示动态图标
@@ -2067,7 +2072,7 @@ class StatusBubble(QWidget):
         self._pin_btn = _HeadIconButton("pin", self)
         self._fold_btn = _HeadIconButton("close", self)
         for b in (self._pin_btn, self._fold_btn):
-            b.setFixedSize(_kit.bs(16), _kit.bs(16))
+            b.setFixedSize(_kit.bs(24), _kit.bs(24))
             b.setCursor(Qt.PointingHandCursor)
         self._pin_btn.clicked.connect(self._toggle_pin)
         self._fold_btn.clicked.connect(self._close_bubble)
@@ -3015,10 +3020,10 @@ class StatusBubble(QWidget):
     # ---------- 模块行右键菜单（刷新/启停/排序/删除） ----------
 
     _ROW_MENU_QSS = (
-        "QMenu{background:#232a3a;color:#e8ecf5;border:1px solid "
-        "rgba(255,255,255,40);padding:2px;}"
-        "QMenu::item{padding:4px 16px;font-size:10px;}"
-        "QMenu::item:selected{background:rgba(74,144,226,130);border-radius:3px;}"
+        "QMenu{background:#232a3a;color:#e8ecf5;border:1.5px solid "
+        "rgba(255,255,255,40);padding:3px;}"
+        "QMenu::item{padding:6px 24px;font-size:15px;}"
+        "QMenu::item:selected{background:rgba(74,144,226,130);border-radius:4.5px;}"
         "QMenu::item:disabled{color:rgba(200,215,240,70);}")
 
     def contextMenuEvent(self, event):
@@ -3647,7 +3652,7 @@ class StatusBubble(QWidget):
         full = max(int(p[3]) for p in panels)
         pet_h = self.pet.height()
         pet_top = pc.y()
-        gap = _bs(6)
+        gap = _bs(9)
         nook_h = full - near_h
         if nook_h < pet_h + gap * 2:
             return None                  # 凹口装不下桌宠

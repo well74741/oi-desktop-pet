@@ -2675,7 +2675,7 @@ def _uf(pt, bold=False):
     f = QFont("Microsoft YaHei")
     try:
         from widgets import kit
-        f.setPointSizeF(pt * kit.UI_BASE)
+        f.setPointSizeF(pt)
     except Exception:
         f.setPointSize(pt)
     f.setBold(bold)
@@ -2715,7 +2715,7 @@ class MoodBubble(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self._font = _uf(9)
+        self._font = _uf(13.5)
         self._text = ""
         self._fade_timer = QTimer(self)
         self._fade_timer.setTimerType(Qt.PreciseTimer)
@@ -2737,8 +2737,8 @@ class MoodBubble(QWidget):
         self._fading_out = False
         self._text = text or random.choice(self._phrases)
         fm = QFontMetrics(self._font)
-        w = min(fm.horizontalAdvance(self._text) + _u(24), _u(320))
-        h = fm.height() + _u(12)
+        w = min(fm.horizontalAdvance(self._text) + _u(36), _u(480))
+        h = fm.height() + _u(18)
         self.resize(w, h)
         self._fade_active = False
         self._fade_timer.stop()
@@ -2792,7 +2792,7 @@ class MoodBubble(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setBrush(QColor(46, 50, 66, 215))
         p.setPen(QPen(QColor(255, 255, 255, 40), 1))
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), _u(8), _u(8))
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), _u(12), _u(12))
         p.setFont(self._font)
         p.setPen(QColor(240, 244, 252))
         p.drawText(self.rect(), Qt.AlignCenter, self._text)
@@ -2811,7 +2811,7 @@ class PopupBubble(QWidget):
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self._font = _uf(9)
+        self._font = _uf(13.5)
         self._text = ""
         self._duration_ms = 3000
         self._fade_timer = QTimer(self)
@@ -2835,8 +2835,8 @@ class PopupBubble(QWidget):
         self._text = str(text)
         self._duration_ms = max(500, int(duration_ms or 3000))
         fm = QFontMetrics(self._font)
-        w = min(fm.horizontalAdvance(self._text) + _u(24), _u(320))
-        h = fm.height() + _u(12)
+        w = min(fm.horizontalAdvance(self._text) + _u(36), _u(480))
+        h = fm.height() + _u(18)
         self.resize(w, h)
         self._fade_active = False
         self._fade_timer.stop()
@@ -2901,10 +2901,10 @@ class PopupBubble(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setBrush(QColor(46, 50, 66, 225))
         p.setPen(QPen(QColor(255, 255, 255, 50), 1))
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), _u(8), _u(8))
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), _u(12), _u(12))
         p.setFont(self._font)
         p.setPen(QColor(240, 244, 252))
-        p.drawText(self.rect().adjusted(_u(6), 0, -_u(6), 0), Qt.AlignCenter, self._text)
+        p.drawText(self.rect().adjusted(_u(9), 0, -_u(9), 0), Qt.AlignCenter, self._text)
         p.end()
 
 
@@ -2918,7 +2918,7 @@ class ErrorPopup(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._font = _uf(8)
+        self._font = _uf(12)
         self._title = ""
         self._msg = ""
         self._fade_timer = QTimer(self)
@@ -2942,8 +2942,8 @@ class ErrorPopup(QWidget):
         self._title = str(title or "错误")
         self._msg = str(msg or "")
         fm = QFontMetrics(self._font)
-        w = min(max(fm.horizontalAdvance(self._msg) + _u(28), _u(180)), _u(360))
-        h = fm.height() * 2 + _u(20)
+        w = min(max(fm.horizontalAdvance(self._msg) + _u(42), _u(270)), _u(540))
+        h = fm.height() * 2 + _u(30)
         self.resize(w, h)
         self._fade_active = False
         self._fade_timer.stop()
@@ -2998,13 +2998,13 @@ class ErrorPopup(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setBrush(QColor(56, 32, 36, 235))
         p.setPen(QPen(QColor(240, 120, 110, 200), 1))
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), _u(7), _u(7))
-        p.setFont(_uf(8, True))
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), _u(10), _u(10))
+        p.setFont(_uf(12, True))
         p.setPen(QColor(255, 150, 140))
-        p.drawText(QRect(_u(8), _u(5), self.width() - _u(16), _u(16)), Qt.AlignLeft | Qt.AlignVCenter, self._title)
+        p.drawText(QRect(_u(12), _u(8), self.width() - _u(24), _u(24)), Qt.AlignLeft | Qt.AlignVCenter, self._title)
         p.setFont(self._font)
         p.setPen(QColor(245, 230, 228))
-        p.drawText(QRect(_u(8), _u(20), self.width() - _u(16), self.height() - _u(24)),
+        p.drawText(QRect(_u(12), _u(30), self.width() - _u(24), self.height() - _u(36)),
                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, self._msg)
         p.end()
 

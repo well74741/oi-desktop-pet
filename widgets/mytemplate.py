@@ -25,7 +25,7 @@ from widgets import ModuleWidget, kit
 class Widget(ModuleWidget):
     """示例组件：标题 + 计数 + 开关 + 进度条 + 可展开说明区。"""
 
-    FIX_H = 90            # 固定高度；内容会变化的组件不要 setFixedHeight
+    FIX_H = 135            # 固定高度；内容会变化的组件不要 setFixedHeight
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,8 +33,8 @@ class Widget(ModuleWidget):
         self._bar = 40
 
         # ---------- 界面（kit 工具库，风格统一） ----------
-        self._title = kit.lab("模板", size=11, bold=True)
-        self._counter = kit.lab("计数 0", size=10, color="#7db6ff")
+        self._title = kit.lab("模板", size=16.5, bold=True)
+        self._counter = kit.lab("计数 0", size=15, color="#7db6ff")
         btn_plus = kit.btn("＋1", primary=True)
         btn_plus.setCursor(Qt.PointingHandCursor)
         btn_plus.clicked.connect(self._inc)
@@ -43,7 +43,7 @@ class Widget(ModuleWidget):
         btn_reset.clicked.connect(self._reset)
 
         self._switch = kit.switch(False, on_text="开", off_text="关")
-        self._progress = kit.progress(self._bar, 100, height=8)
+        self._progress = kit.progress(self._bar, 100, height=12)
         # 进度条动起来（示例定时器）
         self._timer = QTimer(self)
         self._timer.setInterval(2000)
@@ -54,7 +54,7 @@ class Widget(ModuleWidget):
             kit.row(self._title, kit.hsep(), self._counter),
             kit.row(btn_plus, btn_reset, self._switch),
             self._progress,
-            margins=(6, 4, 6, 4))
+            margins=(9, 6, 9, 6))
         self.setLayout(lay)
         self._load()
 
