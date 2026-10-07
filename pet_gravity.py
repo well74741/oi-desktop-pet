@@ -162,6 +162,30 @@ def foreground_fullscreen_screen():
         return None
 
 
+def _foreground_is_self():
+    """前台窗口是不是我们自己的（桌宠 / 径向菜单 / 设置窗等）。
+
+    全屏判定必须把自家窗口排除在外：用户点一下桌宠、或者菜单展开抢到前台时，
+    GetForegroundWindow 拿到的就是我们自己。那个窗口尺寸不等于整块屏幕，会被
+    当成"全屏结束了"，于是 is_fullscreen 和"热键临时叫醒"的状态一起被清掉 ——
+    全屏视频还开着，桌宠却永久留在上面。自己在场时"什么都没发生"才是对的。
+    """
+    if sys.platform != 'win32':
+        return False
+    try:
+        import ctypes
+        import ctypes.wintypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if hwnd == 0:
+            return False
+        pid = ctypes.wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value == os.getpid()
+    except Exception:
+        return False
+
+
 def is_foreground_fullscreen():
     """兼容旧调用：前台是否有窗口处于全屏（不区分屏幕）。"""
     return foreground_fullscreen_screen() is not None
@@ -2054,6 +2078,19 @@ class RadialMenu(QWidget):
         if getattr(self, '_reorder_toast', None) is not None:
             self._reorder_toast.close()
             self._reorder_toast = None
+
+    def hideEvent(self, event):
+        """菜单一收起就通知桌宠。
+
+        收起不止一条路径：点盘外、点按钮后启动程序、点桌宠、右键菜单、以及开合
+        动画播完那一刻自己 hide()。全都经过这里，所以通知挂在这儿最省心 ——
+        全屏下热键把桌宠一起亮出来过，这时要让它回到隐藏状态。
+        """
+        try:
+            self.pet._on_menu_hidden()
+        except Exception:
+            pass
+        super().hideEvent(event)
 
     def moveEvent(self, event):
         """窗口被系统/窗管移动时立刻自纠。
@@ -6066,6 +6103,8 @@ class GravityPet(QWidget):
         self.snap_duration = SNAP_MOVE_DURATION
         self.is_fullscreen = False
         self._fs_count = 0
+        # 全屏下热键"完整呼出"时置位：桌宠是被临时叫醒的，菜单一收回就要再藏起来
+        self._fs_summoned = False
         self.original_pixmap = None
         self._gif_movie = None
         self._gif_frame_pm = None
@@ -6660,6 +6699,14 @@ class GravityPet(QWidget):
         # 不应该把副屏上的桌宠也藏掉。
         if self.is_dragging:
             return
+        if self._fs_summoned and _foreground_is_self():
+            # 热键在全屏下把桌宠叫醒后，前台很可能就是我们自己（菜单展开 / 用户点了
+            # 桌宠）。这时"前台有没有全屏应用"根本问不出答案：我们自己的窗口尺寸
+            # 不等于屏幕，会被当成"全屏结束了"，连叫醒状态一起清掉，桌宠就永久
+            # 压在全屏视频上了。保持现状不动。
+            # 只在叫醒期间跳过：平时不能跳（普通窗口在前台时若一直跳过，
+            # is_fullscreen 会被永久钉住，之后再也没人纠正它）。
+            return
         try:
             scr = foreground_fullscreen_screen()
             fs = False
@@ -6681,6 +6728,8 @@ class GravityPet(QWidget):
                     if self.radial_menu.is_visible_state:
                         self.radial_menu.hide_menu(animate=False)
                 else:
+                    # 退出全屏：桌宠恢复正常显示，"临时叫醒"这回事不存在了
+                    self._fs_summoned = False
                     self.show()
                     self.raise_()
         else:
@@ -7284,6 +7333,17 @@ class GravityPet(QWidget):
         try:
             if self.radial_menu is None:
                 return
+            # 全屏应用挡着时桌宠是藏着的（_check_fullscreen 干的）。热键这时必须
+            # **完整**呼出：只展开菜单就会留下一个孤零零的盘子 —— 桌宠不可见就没东西
+            # 可点来收回，菜单自己也等不到"点盘外"（那个窗口不该抓焦点），于是关不掉。
+            # 这里把桌宠一起亮出来，并记下"是被热键临时叫醒的"，菜单收回时再藏回去
+            # （见 _on_menu_hidden 与 RadialMenu.hideEvent）。
+            # getattr 兜底：这里外面包着宽泛的 except，属性一缺就整个静默失效
+            # （用户按热键什么都不发生），比"少一次叫醒"难查得多
+            if getattr(self, "is_fullscreen", False):
+                self._fs_summoned = True
+                self.show()
+                self.raise_()
             if self.settings.get("menu_hotkey_at_cursor", True):
                 from PyQt5.QtGui import QCursor
                 c = QCursor.pos()
@@ -7303,7 +7363,21 @@ class GravityPet(QWidget):
             elif not menu._animating:
                 menu.show_menu(shortcuts)
         except Exception:
-            pass
+            # 呼出失败：别把"临时叫醒"的状态留着，否则全屏下桌宠会一直亮在上面
+            if getattr(self, "_fs_summoned", False):
+                self._fs_summoned = False
+                self.hide()
+
+    def _on_menu_hidden(self):
+        """径向菜单收起了（点盘外 / 点按钮 / 点桌宠 / 动画播完，所有路径都走这里）。
+
+        全屏下被热键"临时叫醒"的桌宠，这时候要收回去 —— 不然它会一直停在
+        全屏视频上层，看起来就是"关不掉了"。
+        """
+        if not getattr(self, "_fs_summoned", False):
+            return
+        self._fs_summoned = False
+        self.hide()
 
     def _menu_anchor(self):
         """弹提示用的锚点（桌宠中心）。"""

@@ -295,6 +295,69 @@ for tag, sc in (("空盘", []), ("有按钮", SC)):
     check("%s：收起后盘面精确归零且窗口收掉" % tag,
           cl == (0.0, False, False), "scale=%s animating=%s visible=%s" % cl)
 
+# ---------- 11. 全屏下热键：桌宠要和菜单一起出来，收回后再自己藏好 ----------
+# 回归：全屏看视频时 _check_fullscreen 把桌宠藏了，而 _on_hotkey 没管这个状态，
+# 照样展开菜单 —— 菜单是独立顶层窗口，于是屏幕上只剩一个孤零零的盘子。
+# 桌宠不可见就点不到它来收回，"点盘外"又等不到（那个窗口不该抓焦点），
+# 菜单于是关不掉。用户原话："会出现一个单独的菜单盘，桌宠消失了，并且无法关闭"。
+pet_w.fs_timer.stop()          # 别让 500ms 轮询插进来改 is_fullscreen
+pet_w.is_fullscreen = True
+
+
+def _hotkey_summon():
+    pet_w.hide()
+    app.processEvents()
+    pet_w._on_hotkey()
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 0.9:
+        app.processEvents()
+        time.sleep(0.016)
+    return pet_w.isVisible(), menu.isVisible()
+
+
+_vis, _mvis = _hotkey_summon()
+check("全屏热键：桌宠和菜单一起出来（不再只剩一个孤盘）",
+      _vis and _mvis, "桌宠=%s 菜单=%s" % (_vis, _mvis))
+check("全屏热键：展开期间桌宠不会又被全屏轮询藏回去",
+      pet_w.isVisible() and pet_w.is_fullscreen)
+
+# 收回路径不止一条，每条都要把桌宠送回隐藏状态
+for tag, close in (
+        ("立即收（点盘外 / animate=False）",
+         lambda: menu.hide_menu(animate=False)),
+        ("动画播完（点按钮启动程序）", lambda: menu.hide_menu()),
+        ("点桌宠收回", lambda: menu.toggle_menu(SC))):
+    _vis, _mvis = _hotkey_summon()
+    assert _vis and _mvis, "前置条件：%s 之前应当是展开的" % tag
+    close()
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 1.0 and (menu.isVisible() or menu._animating):
+        app.processEvents()
+        time.sleep(0.016)
+    check("全屏热键·%s：菜单收起了" % tag, not menu.isVisible())
+    check("全屏热键·%s：桌宠跟着藏回去（不然它会一直压在全屏视频上）" % tag,
+          not pet_w.isVisible(), "桌宠可见=%s" % pet_w.isVisible())
+    check("全屏热键·%s：临时叫醒的标志清掉了" % tag,
+          pet_w._fs_summoned is False)
+
+# 非全屏：热键呼出后收起，桌宠必须还在（别把正常情况也藏了）
+pet_w.is_fullscreen = False
+pet_w._fs_summoned = False
+pet_w.show()
+pet_w._on_hotkey()
+t0 = time.monotonic()
+while time.monotonic() - t0 < 0.9:
+    app.processEvents()
+    time.sleep(0.016)
+menu.hide_menu(animate=False)
+t0 = time.monotonic()
+while time.monotonic() - t0 < 0.5:
+    app.processEvents()
+    time.sleep(0.016)
+check("非全屏：热键呼出再收起，桌宠照旧留在屏幕上",
+      pet_w.isVisible() and not menu.isVisible())
+pet_w.fs_timer.start(500)
+
 # 提示文字排版：屏内 / 不被桌宠压住 / 不超出盘沿，放不下就竖排
 _f = QFont("Microsoft YaHei")
 # 字号要和真实绘制一致（pet_gravity 里是 13.5 * pet_k()）：13.5 = 旧版的 9 × 1.5，
