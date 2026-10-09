@@ -1796,19 +1796,177 @@ def _chat_html(text, code_blocks=None, collapse_long=False, expanded=None,
                     pass
             out.append(copy if copy else _html.escape(code))
         else:
-            out.append(_chat_html_inline(seg))
+            out.append(_md_blocks(seg))
     # 用 div 包裹（span 内不能放 table 等块级元素，会导致代码块被 Qt 丢弃）
     return "<div style='white-space:pre-wrap;'>%s</div>" % "".join(out)
 
 
+_MD_INLINE_CODE = "<code style='background:rgba(255,255,255,25);border-radius:3px;" \
+                  "padding:0 3px;font-family:Consolas,monospace;font-size:15px;" \
+                  "color:#f0e68c;'>%s</code>"
+
+# 块级 Markdown 的字号/颜色基准（对齐气泡里正文 15px 的既有配色）
+_MD_H = {1: 19, 2: 18, 3: 17, 4: 16, 5: 15, 6: 15}
+
+
+def _md_blocks(seg):
+    """段落里的块级 Markdown：标题 / 无序列表 / 有序列表 / 引用 / 分隔线。
+
+    `_chat_html` 把 ```代码块``` 之外的段整段交给这里。段内仍有换行，
+    所以逐行识别块级开头，普通行回落到 _chat_html_inline（行内语法）。
+
+    刻意不做的（Qt rich text 支持不稳 / 收益低）：
+      - 表格：Qt 的 QTextTable 在富文本里由 setHtml 重建，列宽经常塌成
+        一团；代码块已经是表格实现的，再叠一层容易出第 7.4 节那种坑。
+        AI 输出表格时让它落在代码块里（```），渲染和复制都正常。
+      - 嵌套列表：只有一级，嵌套在纯文本管道里折叠成前缀空格。
+    """
+    lines = seg.split("\n")
+    out = []
+    para = []              # 累积普通行，遇到块级/结尾时成段冲出去
+
+    def flush():
+        if para:
+            text = "\n".join(para)
+            out.append(_chat_html_inline(text))
+            del para[:]
+
+    i = 0
+    n = len(lines)
+    while i < n:
+        ln = lines[i]
+        stripped = ln.strip()
+        # 分隔线：--- / *** / ___（三个以上，整行只有它）
+        if re.fullmatch(r"(-{3,}|\*{3,}|_{3,})", stripped):
+            flush()
+            out.append("<hr style='border:none;border-top:1px solid rgba(255,255,255,45);"
+                       "margin:6px 0;'>")
+            i += 1
+            continue
+        # 标题：# ~ ######（Qt 只认 <h1>~<h3> 的部分样式，字号自己给）
+        m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        if m:
+            flush()
+            lvl = min(len(m.group(1)), 6)
+            inner = _md_inline_tokens(_html.escape(m.group(2)))
+            sz = _MD_H[lvl]
+            out.append("<div style='font-size:%dpx;font-weight:600;color:#dfe6f2;"
+                       "margin:4px 0 2px 0;'>%s</div>" % (sz, inner))
+            i += 1
+            continue
+        # 引用：> 开头（连续行合并成一块）
+        if stripped.startswith(">"):
+            flush()
+            quote = []
+            while i < n and lines[i].strip().startswith(">"):
+                quote.append(re.sub(r"^\s*>\s?", "", lines[i]))
+                i += 1
+            inner = _md_inline_tokens(_html.escape("\n".join(quote)))
+            inner = inner.replace("\n", "<br>")
+            out.append("<div style='border-left:3px solid rgba(122,169,232,120);"
+                       "padding:2px 8px;margin:4px 0;color:#aebdd4;'>%s</div>" % inner)
+            continue
+        # 无序列表：- / * / + 开头（连续行合并；* 与斜体不冲突——列表符后有空格）
+        m = re.match(r"^[-*+]\s+(.*)$", stripped)
+        if m and not re.match(r"^\*{3,}$", stripped):
+            flush()
+            items = []
+            while i < n:
+                mm = re.match(r"^[-*+]\s+(.*)$", lines[i].strip())
+                if not mm:
+                    break
+                items.append(_md_inline_tokens(_html.escape(mm.group(1))))
+                i += 1
+            out.append("<ul style='margin:2px 0 2px 18px;padding-left:0;'>%s</ul>"
+                       % "".join("<li>%s</li>" % it for it in items))
+            continue
+        # 有序列表：1. 2. 3. / 中文习惯 1、2、3、（顿号后不空格也算）
+        m = re.match(r"^[0-9]{1,3}(?:[.、]\s*|\s+)(.*)$", stripped)
+        if m:
+            flush()
+            items = []
+            while i < n:
+                mm = re.match(r"^[0-9]{1,3}(?:[.、]\s*|\s+)(.*)$", lines[i].strip())
+                if not mm:
+                    break
+                items.append(_md_inline_tokens(_html.escape(mm.group(1))))
+                i += 1
+            out.append("<ol style='margin:2px 0 2px 18px;padding-left:0;'>%s</ol>"
+                       % "".join("<li>%s</li>" % it for it in items))
+            continue
+        para.append(ln)
+        i += 1
+    flush()
+    return "".join(out)
+
+
+
+
+def _md_escape_href(u):
+    """链接 href 里的引号/尖括号转义：防 AI 输出 `](x)" onmouseover=…` 注入属性。"""
+    return str(u or "").replace("&", "&amp;").replace('"', "&quot;") \
+                       .replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _md_inline_tokens(s):
+    """行内 Markdown → HTML（s 已整体转义过）。
+
+    顺序不能随意换：
+      1. 行内代码先做并占位 —— 里面不允许再出现任何 Markdown 语法
+         （`**bold**` 在代码里就是字面星号）；
+      2. 链接在粗体/斜体之前 —— `[**x**](u)` 的链接文字里允许有粗体，
+         而链接的括号不能先被当成斜体吃掉；
+      3. 粗斜体 `***x***` 先于粗体/斜体，`~~x~~` 最后。
+    """
+    out = []
+    pos = 0
+    # 1) 行内代码占位：`\`x\`` → \x00N\x00（内容原样，不做任何 Markdown）
+    codes = []
+
+    def _stash(m):
+        codes.append(_MD_INLINE_CODE % m.group(1))
+        return "\x00%d\x00" % (len(codes) - 1)
+
+    s = re.sub(r"`([^`\n]+)`", _stash, s)
+    # 2) 链接 [text](url)。text 里允许嵌行内格式（下面还会再跑一遍粗斜体）
+    # URL 禁止引号/尖括号：`[x](u" onmouseover=…)` 不让引号进 href，
+    # 进了就是属性注入面（转义后不可执行，但语义也歪：把 "junk 留成裸文本）
+    s = re.sub(r"\[([^\]\n]+)\]\(([^)\s\"<>]+)\)",
+               lambda m: '<a href="%s">%s</a>'
+                         % (_md_escape_href(m.group(2)), m.group(1)), s)
+    # 3) 粗斜体 → 粗体 → 斜体 → 删除线。非贪婪 + 禁止两侧紧贴空白，
+    #    避免把 "3 * 4 * 5" 这种数学式子中间的星号当斜体。
+    #    斜体不用 \w 边界（\w 不含中文，"中文*斜体*中文"会失配），
+    #    改为"两侧不是空白/星号"，天然排除 "3 * 4 * 5"（星号旁是空格）。
+    s = re.sub(r"\*\*\*([^\s*][^*]*?[^\s*]|\S)\*\*\*", r"<b><i>\1</i></b>", s)
+    s = re.sub(r"\*\*([^\s*][^*]*?[^\s*]|\S)\*\*", r"<b>\1</b>", s)
+    s = re.sub(r"(?<![\s*])\*([^\s*][^*]*?[^\s*]|\S)\*(?![\s*])", r"<i>\1</i>", s)
+    s = re.sub(r"~~([^\s~][^~]*?[^\s~]|\S)~~", r"<s>\1</s>", s)
+    # 4) 行内代码放回（占位符在 1~3 步里不会被改动：\x00 不在任何语法里）
+    s = re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m.group(1))], s)
+    out.append(s)
+    return "".join(out)
+
+
 def _chat_html_inline(seg):
-    """普通段落：转义、行内代码、链接可点击、保留换行。"""
+    """普通段落：完整 Markdown 行内语法（粗体/斜体/删除线/行内代码/链接）。
+
+    对齐浏览器里的显示（用户反馈：AI 输出里一堆 `**星号**` 原样显示，看着像
+    格式坏了）。块级语法（标题/列表/引用/分隔线）由 _md_block 负责换行处理，
+    这里只管行内。**先整体转义再做 Markdown 替换**：`<b>` 之类是我们自己生成
+    的标签，AI 输出里的 `<script>` 则在转义那一步就变成了 &lt;script&gt;。
+    """
     s = _html.escape(seg)
-    s = re.sub(r"`([^`]+)`",
-               lambda m: ("<code style='background:rgba(255,255,255,25);border-radius:3px;"
-                          "padding:0 3px;font-family:Consolas,monospace;font-size:15px;"
-                          "color:#f0e68c;'>%s</code>" % m.group(1)), s)
-    s = _LINK_RE.sub(lambda m: '<a href="%s">%s</a>' % (m.group(0), m.group(0)), s)
+    s = _md_inline_tokens(s)
+    # 裸链接（Markdown 没写成 [x](u) 的）：只在"还没被 <a> 包住"的文本里替换。
+    # 先做 Markdown 再做这一步的话，上面生成的 href="https://…" 会被再包一层
+    # <a>，嵌套错乱（实测链接案例就是这么坏的）。
+    def _bare_link(m):
+        # 已在 href="…" 里面的 URL 不再包（那会把上一轮生成的链接再嵌一层）
+        i = m.start()
+        return m.group(0) if s[max(0, i - 6):i] == 'href="' \
+            else '<a href="%s">%s</a>' % (m.group(0), m.group(0))
+    s = _LINK_RE.sub(_bare_link, s)
     s = s.replace("\n", "<br>")
     return s
 

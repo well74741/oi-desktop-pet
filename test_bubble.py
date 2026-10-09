@@ -45,6 +45,40 @@ html = _chat_html("```python\nprint(1)\n```", blocks)
 check("代码块解析与表格渲染", blocks == ["print(1)"] and "<table" in html)
 check("代码块铺满宽度", "width='100%'" in html)
 
+# ---------- 2b. 聊天 Markdown（对齐浏览器显示；以前 **星号** 原样显示）----------
+# 回归：AI 输出里一堆 **粗体**，旧渲染只认 ``` 代码块和 `行内代码`，
+# 星号原样显示看着像格式坏了。这里覆盖行内 + 块级两套。
+from bubble_ui import _chat_html_inline as _chi, _md_blocks as _mb
+
+check("MD：粗体", "<b>加粗</b>" in _chi("这是**加粗**的字"))
+check("MD：斜体（中文两侧无空格也算）", "<i>斜体</i>" in _chi("这是*斜体*的字"))
+check("MD：删除线", "<s>删除</s>" in _chi("这是~~删除~~的字"))
+check("MD：行内代码里的星号是字面量",
+      "<b>x</b>" not in _chi("行内 `a **x** b` 外面"))
+check("MD：数学式 3 * 4 * 5 不被当斜体",
+      "<i>" not in _chi("3 * 4 * 5 = 60"))
+check("MD：[文本](链接)", '<a href="https://example.com/docs">' in _chi("看[文档](https://example.com/docs)"))
+check("MD：裸链接可点", '<a href="https://example.com">https://example.com</a>'
+      in _chi("见 https://example.com"))
+check("MD：生成的链接不被二次嵌套",
+      ('<a href="<a') not in _chi("[x](https://example.com/a)"))
+check("MD：<script> 转义不执行", "<script>" not in _chi("<script>alert(1)</script>"))
+check("MD：href 引号注入被拦（引号进不了 href，尾随文本只被转义）",
+      ('href="https://e.com&quot;"' in _chi('[x](https://e.com" onmouseover=alert(1))')
+       or "href" not in _chi('[x](https://e.com" onmouseover=alert(1))'))
+      and "<script>" not in _chi('[x](https://e.com" <script>x</script>)'))
+check("MD：标题", "font-weight:600" in _mb("# 大标题"))
+check("MD：无序列表", "<li>项目一</li><li>项目二</li>" in _mb("- 项目一\n- 项目二"))
+check("MD：有序列表（1. 中文顿号 1、 都认）",
+      "<ol" in _mb("1. 第一\n2. 第二") and "<ol" in _mb("1、第一"))
+check("MD：引用块", "border-left:3px solid" in _mb("> 引用一行\n> 两行"))
+check("MD：分隔线", "<hr" in _mb("前面\n\n---\n\n后面"))
+check("MD：列表项里的行内格式", "<li><b>粗</b>项</li>" in _mb("- **粗**项"))
+check("MD：整链（标题+列表+粗体+代码块共存）",
+      "font-weight:600" in _chat_html("# T\n- **b** 项\n正文**粗**")
+
+      and "<table" in _chat_html("```python\nprint(1)\n```"))
+
 # ---------- 3. 折叠动画 ----------
 class FakeBubble:
     _fold_locked = False

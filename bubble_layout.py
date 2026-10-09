@@ -1388,8 +1388,24 @@ class StatusBubbleLayout(StatusBubble):
         """
         try:
             from webchat_ui import open_webchat
-            open_webchat(self, finished=lambda ok, err: self._sync_btn_rows())
+            def _done(ok, err):
+                # 静默失败是最难查的：点了没反应、哪一环坏了完全没痕迹
+                # （用户报过"点击打开没有窗口弹出"，重启后自己好了，无据可查）。
+                # 失败/超时写进 %TEMP%/oi_pet_error.log，用 pet_gravity 的统一入口。
+                if not ok:
+                    try:
+                        import pet_gravity as _G
+                        _G._error_log("[webchat] open_webchat 失败: %s" % (err or "未知原因"))
+                    except Exception:
+                        pass
+                self._sync_btn_rows()
+            open_webchat(self, finished=_done)
         except Exception as e:
+            try:
+                import pet_gravity as _G
+                _G._error_log("[webchat] open_webchat 抛异常: %r" % (e,))
+            except Exception:
+                pass
             try:
                 from widgets import kit as _k
                 _k.warn(self, "聚合AI", "打开失败：%s" % e)
