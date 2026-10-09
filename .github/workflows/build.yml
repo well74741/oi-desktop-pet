@@ -1,0 +1,192 @@
+# 云端打包：推一个 vX.Y.Z 标签就出安装包，并自动挂到 Release 上。
+#
+# 为什么必须跑 windows-latest：PyInstaller 不能跨平台打包（官方原话
+# "it is not a cross-compiler"），Linux/macOS runner 出不了 .exe。
+#
+# 为什么直接调 build.bat 而不是把打包步骤抄一遍：本地和 CI 各维护一份打包逻辑，
+# 迟早会漂移（改了一边忘了另一边）。build.bat 干的事就是"跑测试 → 出包 →
+# 出安装包"，CI 只要给它一个能跑的环境。唯一要补的是 Inno Setup 的路径
+# （见下面 ISCC 那段）。
+name: build
+
+on:
+  push:
+    tags:
+      - "v*"          # 正式发版：v0.9.42 这种
+  workflow_dispatch:  # 也可以在 Actions 页面手动点一次（只出产物，不发 Release）
+
+permissions:
+  contents: write     # 创建 Release、上传附件要用
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- 版本号唯一来源：module_core.APP_VERSION ----------
+      # 校验标签和代码里的版本号一致。不一致时发出来的包会叫另一个版本，
+      # 而在线更新（updater.py 查 releases/latest）会挑到错的附件 —— 这种
+      # 错法很隐蔽，所以在最前面就卡住。
+      - name: 读版本号并校验标签
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path module_core.py -Pattern '^APP_VERSION\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if (-not $v) { throw "读不到 module_core.APP_VERSION" }
+          Write-Host "代码里的版本号: $v"
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME
+            Write-Host "标签: $tag"
+            if ($tag -ne "v$v") {
+              throw "标签 $tag 和 APP_VERSION $v 对不上。发版前把 module_core.APP_VERSION 改成 $($tag.TrimStart('v')) 再打标签。"
+            }
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      # ---------- 打包环境 ----------
+      # 固定 3.12：HANDOFF 里记过 3.14 + PyInstaller onefile 在自动重启场景
+      # 反复出 _MEI/python314.dll 兼容问题，3.12 稳定。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      # ---------- Inno Setup ----------
+      # windows-latest 自带 Inno Setup 6，但装在 Program Files (x86)，
+      # 而 build.bat 的自查顺序是 "Program Files\Inno Setup 7" → 下面那两个，
+      # 7 和 6 同时存在时会挑错版本。所以这里主动找一遍，用 ISCC 环境变量告诉它
+      # （build.bat 里是 `if not defined ISCC`，会尊重外部传进来的值）。
+      #
+      # 优先查注册表而不是猜目录：Inno 的安装位置随版本和安装方式变
+      # （本机就是装在 %LOCALAPPDATA%\Programs 下的用户级目录），写死路径迟早踩空。
+      - name: 找 Inno Setup 的 ISCC.exe
+        shell: pwsh
+        run: |
+          function Find-Iscc {
+            # Inno Setup 会在卸载信息里记下自己的安装目录
+            foreach ($hive in @(
+              "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup_is1",
+              "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup_is1",
+              "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup_is1"
+            )) {
+              try {
+                $dir = (Get-ItemProperty -Path $hive -ErrorAction Stop).InstallLocation
+                if ($dir) {
+                  $p = Join-Path $dir "ISCC.exe"
+                  if (Test-Path $p) { return $p }
+                }
+              } catch { }
+            }
+            # 注册表查不到再退回常见路径
+            return @(
+              "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+              "C:\Program Files\Inno Setup 6\ISCC.exe",
+              "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+            ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+
+          $c = Find-Iscc
+          if (-not $c) {
+            Write-Host "没找到 Inno Setup，装一个"
+            choco install innosetup --no-progress -y
+            $c = Find-Iscc
+          }
+          if (-not $c) { throw "Inno Setup 装不上，出不了安装包" }
+          Write-Host "ISCC = $c"
+          "ISCC=$c" >> $env:GITHUB_ENV
+
+      # ---------- 打包 ----------
+      # PYENV 指向 setup-python 装的那个解释器，build.bat 就不再去找
+      # %LOCALAPPDATA%\oi-packenv（那是给人用的本地约定，runner 上没有）。
+      # build.bat 自己会先跑 run_all_tests.py 当闸门，测试不过就不出包。
+      - name: 跑测试 + 打包
+        shell: cmd
+        # 这段必须纯 ASCII：Actions 把 run: 存成临时 .cmd 直接执行，没有 chcp，
+        # 中文会被 runner 的 437 代码页弄坏。中文的事交给 build.bat 自己
+        # （它第一行就是 chcp 65001，本地一直是这么跑的）。
+        run: |
+          set "PYENV=%pythonLocation%\python.exe"
+          echo PYENV=%PYENV%
+          echo ISCC=%ISCC%
+          call build.bat
+          if errorlevel 1 exit /b 1
+
+      # ---------- 产物校验 ----------
+      # 本地打包后是人工看 sha256；CI 里让脚本自己证明"东西真的出来了"，
+      # 免得打出一个空包还高高兴兴发出去。
+      - name: 校验产物
+        id: artifacts
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $setup = "dist\oi-pet_Setup_v$v.exe"
+          $portable = "dist\oi桌宠$v.exe"
+          foreach ($f in @($setup, $portable)) {
+            if (-not (Test-Path $f)) { throw "没生成 $f" }
+            $mb = [math]::Round((Get-Item $f).Length / 1MB, 1)
+            Write-Host "$f  ($mb MB)"
+            if ((Get-Item $f).Length -lt 5MB) { throw "$f 太小了（$mb MB），多半是空包" }
+          }
+          $h = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          Write-Host "安装包 sha256: $h"
+          "setup=$((Resolve-Path $setup).Path)" >> $env:GITHUB_OUTPUT
+          "portable=$((Resolve-Path $portable).Path)" >> $env:GITHUB_OUTPUT
+          "sha256=$h" >> $env:GITHUB_OUTPUT
+
+      - name: 算 sha256 校验单
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $out = "dist\oi-pet_Setup_v$v.exe.sha256"
+          "${{ steps.artifacts.outputs.sha256 }}  oi-pet_Setup_v$v.exe" |
+            Out-File -Encoding ascii $out
+          Get-Content $out
+
+      # ---------- 交付 ----------
+      # 两个 exe 都给：安装包是在线更新认的那个（updater.py 挑"名字带 setup
+      # 且以 .exe 结尾"），便携版给不想装的人。
+      # 名字里别带中文：GitHub 会把附件名里的非 ASCII 字符改掉（"桌宠"→"."），
+      # 在线更新就是按 setup + .exe 这两个特征认的，改名会让它挑不到。
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oi-pet-v${{ steps.ver.outputs.version }}
+          path: |
+            dist/oi-pet_Setup_v${{ steps.ver.outputs.version }}.exe
+            dist/oi-pet_Setup_v${{ steps.ver.outputs.version }}.exe.sha256
+            dist/oi桌宠${{ steps.ver.outputs.version }}.exe
+          if-no-files-found: error
+
+      # 只有打标签才发 Release；手动触发（workflow_dispatch）只出 artifact，
+      # 方便先下来试，确认没问题再打标签。
+      - name: 发 Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ steps.ver.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          draft: true          # 先存草稿：确认附件和 sha256 没问题再手动发布
+          generate_release_notes: true
+          body: |
+            ## 安装包
+
+            `oi-pet_Setup_v${{ steps.ver.outputs.version }}.exe`
+
+            sha256（和 GitHub 附件页显示的 digest 应当一致）：
+
+            ```
+            ${{ steps.artifacts.outputs.sha256 }}
+            ```
+
+            > 这是云端构建产物，由 GitHub Actions 在 windows-latest 上打出。
+            > 发布前请先在虚拟机或本机装一遍确认可用。
+          files: |
+            dist/oi-pet_Setup_v${{ steps.ver.outputs.version }}.exe
+            dist/oi-pet_Setup_v${{ steps.ver.outputs.version }}.exe.sha256
+            dist/oi桌宠${{ steps.ver.outputs.version }}.exe
