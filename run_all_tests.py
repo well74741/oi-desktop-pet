@@ -51,9 +51,12 @@ def run(name, sandbox):
     # 这里给子进程钉死 UTF-8：套件自己不用管跑在哪块控制台上。
     env.setdefault("PYTHONIOENCODING", "utf-8")
     t0 = time.monotonic()
+    # encoding 必须显式 utf-8：text=True 会用 locale 编码（CI 是 cp1252），
+    # 子进程明明输出的是上一行钉死的 UTF-8，收回来解码成乱码，日志里就
+    # 全是 ç³»ç»Ÿç¨‹åº 这种花字。errors=replace：再出问题也只丢几个字符。
     p = subprocess.run([sys.executable, "-u", os.path.join(HERE, name)],
                        cwd=HERE, env=env, capture_output=True,
-                       text=True, errors="replace")
+                       encoding="utf-8", errors="replace")
     out = (p.stdout or "") + (p.returncode and (p.stderr or "") or "")
     dt = time.monotonic() - t0
     # 各套件的收尾行格式不完全一样，这里只抓"通过/失败"的数字，抓不到就算 0
