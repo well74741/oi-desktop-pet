@@ -111,6 +111,11 @@ jobs:
         # 这段必须纯 ASCII：Actions 把 run: 存成临时 .cmd 直接执行，没有 chcp，
         # 中文会被 runner 的 437 代码页弄坏。中文的事交给 build.bat 自己
         # （它第一行就是 chcp 65001，本地一直是这么跑的）。
+        env:
+          # Python 的打印编码跟控制台走：不设的话 runner 的 cp1252 打中文就
+          # UnicodeEncodeError（run_all_tests.py 的失败信息就是这么炸的）。
+          # 子进程（_prune_dist.py 打中文类别名）也继承它。
+          PYTHONIOENCODING: utf-8
         run: |
           set "PYENV=%pythonLocation%\python.exe"
           echo PYENV=%PYENV%

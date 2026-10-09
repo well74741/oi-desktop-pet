@@ -24,6 +24,16 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 QUIET = "-q" in sys.argv or "--quiet" in sys.argv
 
+# stdout/stderr 统一 UTF-8：不然编码跟着控制台走。CI（GitHub Actions 的
+# windows runner）是 cp1252，打印中文测试输出直接 UnicodeEncodeError 炸掉——
+# 而且是在打印失败信息那行炸的，把真正挂掉的套件名都吞了，比挂掉本身更难查。
+# 错误处理选 backslashreplace：再出问题也只丢这一行的可读性，不再中断汇总。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except Exception:
+        pass
+
 
 def suites():
     """按文件名排序的测试套件；跑得快的排前面只是为了早点看到结果。"""
@@ -36,6 +46,10 @@ def run(name, sandbox):
     env = dict(os.environ)
     env["TEMP"] = env["TMP"] = sandbox
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # 套件打印的是中文结果（PASS/FAIL + 名称），CI 的 cp1252 控制台编不出中文，
+    # 套件会在 check() 的 print 那里直接崩——而且崩在结果行上，统计全丢。
+    # 这里给子进程钉死 UTF-8：套件自己不用管跑在哪块控制台上。
+    env.setdefault("PYTHONIOENCODING", "utf-8")
     t0 = time.monotonic()
     p = subprocess.run([sys.executable, "-u", os.path.join(HERE, name)],
                        cwd=HERE, env=env, capture_output=True,
