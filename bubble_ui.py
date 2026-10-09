@@ -1618,7 +1618,12 @@ class ChatPanel(QWidget):
         except Exception:
             self._msg_block_starts = []
         sb = self.history.verticalScrollBar()
-        _stream_like = self._streaming or bool(self._thinking_text)
+        # stream-like = 一切"AI 正在输出"的状态：流式、思考过程、以及"连接中/
+        # 接收中"这类状态提示（_thinking 由 set_status 置位、每 400ms 省略号
+        # 动画各 rebuild 一次）。漏了 _thinking 时，用户在"连接中"上翻阅读，
+        # 每 400ms 被强制滚回底部一次（"思考中或连接中时强行滚回来"就是这个）。
+        _stream_like = (self._streaming or bool(self._thinking_text)
+                        or bool(self._thinking))
         self._nav_lock = True
         try:
             if self._preserve_scroll:

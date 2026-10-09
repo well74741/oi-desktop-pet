@@ -1174,26 +1174,84 @@ def _llm_json_array(prompt):
     cfg = _llm_source_cfg()
     if cfg is None:
         raise RuntimeError("未配置大模型（需在 AI助手 模块里填 api_key）")
+    # 预算对齐主对话面板（它用 8192 起）：这里写死 4000 曾让推理模型
+    # （deepseek-flash，reasoning_content 吃掉全部预算）在"思考"里耗尽
+    # token、content 为空，报出来却是误导性的"AI 未返回像素指令"。
+    max_tokens = max(int(cfg.get("max_tokens", 8192) or 8192), 8192)
     body = {"model": cfg.get("model", "deepseek-chat"),
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7, "max_tokens": 4000}
+            "temperature": 0.7, "max_tokens": max_tokens}
     req = urllib.request.Request(
         str(cfg.get("base_url", "https://api.deepseek.com/v1")).rstrip("/")
         + "/chat/completions",
         data=json.dumps(body).encode("utf-8"),
         headers={"Content-Type": "application/json",
                  "Authorization": "Bearer %s" % cfg.get("api_key", "")})
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=120) as resp:
         data = json.loads(resp.read(_MAX_RESP_BYTES).decode("utf-8"))
-    content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
-    # 提取 JSON 数组：AI 可能带 ```json 包裹、说明文字、尾部注释
-    m = re.search(r"\[[\s\S]*\]", content)
-    if not m:
-        raise RuntimeError("AI 未返回像素指令")
-    raw = m.group(0).strip()
-    # 去掉 ```json ... ``` 围栏（若数组被围栏包住，re 仍会匹配到内部 []，此处兜底）
-    raw = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", raw)
-    return json.loads(raw)
+    ch = (data.get("choices") or [{}])[0]
+    msg = ch.get("message", {}) or {}
+    content = msg.get("content") or ""
+    if not str(content).strip():
+        # 推理模型可能把预算全花在思考上（finish_reason=length 且
+        # reasoning_content 有内容）：报真实原因，别报"未返回像素指令"误导排查
+        if str(ch.get("finish_reason") or "") == "length":
+            raise RuntimeError(
+                "AI 回复被 max_tokens=%d 截断（finish_reason=length，思考 %d 字），"
+                "模型 %s 是推理模型，请换普通模型或在对话模型配置里调大 max_tokens"
+                % (max_tokens, len(msg.get("reasoning_content") or ""),
+                   cfg.get("model")))
+        raise RuntimeError("AI 返回了空内容（模型 %s）" % cfg.get("model"))
+    # 提取 JSON 数组：AI 可能带 ```json 包裹、说明文字、尾部注释。
+    # 候选按稳健度排序，谁先解析成功用谁：
+    #   1) 围栏里的整块（```json [..] ```）；
+    #   2) 平衡括号扫描出的完整数组（嵌套 [[..],[..]] 不会在第一个 ] 处截断）；
+    #   3) 贪婪版兜底（第一个 [ 到最后一个 ]，包住说明文字时最宽）。
+    candidates = []
+    fenced = re.search(r"```[a-zA-Z]*\s*(\[[\s\S]*?\])\s*```", content)
+    if fenced:
+        candidates.append(fenced.group(1))
+    depth = 0
+    start = None
+    for idx, ch_ in enumerate(content):
+        if ch_ == "[":
+            if depth == 0:
+                start = idx
+            depth += 1
+        elif ch_ == "]":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    candidates.append(content[start:idx + 1])
+                    start = None
+    greedy = re.search(r"\[[\s\S]*\]", content)
+    if greedy:
+        candidates.append(greedy.group(0))
+
+    def _rank(raw):
+        """含对象元素的数组优先：像素/图元指令的元素必然是 {"x":..} 对象，
+        而说明文字里随手写的 [1]、[已弃用] 解析出来也是数组但没用。
+        出现顺序只能当次优先级——第一个完整数组未必是正文（实测 [1] 抢跑）。"""
+        try:
+            v = json.loads(raw.strip())
+        except Exception:
+            return (2, 0)
+        if isinstance(v, list) and any(isinstance(x, dict) for x in v):
+            return (0, len(json.dumps(v)))
+        return (1, len(json.dumps(v)))
+
+    last_err = None
+    for raw in sorted(candidates, key=_rank):
+        try:
+            val = json.loads(raw.strip())
+            if isinstance(val, list):
+                return val
+        except Exception as e:
+            last_err = e
+            continue
+    if last_err is not None:
+        raise RuntimeError("AI 返回的内容无法解析成 JSON 数组：%s" % last_err)
+    raise RuntimeError("AI 未返回 JSON 数组（返回了 %d 字的其他内容）" % len(content))
 
 
 def _tool_canvas_draw(args):
