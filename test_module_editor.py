@@ -138,15 +138,20 @@ try:
     except Exception as e:
         got = repr(e)
     check("用户以前按旧模板建的（transform 存成字符串）也恢复正常", got == "7.1", got)
-    check("天气模板带 plain_text（否则 wttr.in 回一整张网页）",
-          mt.BY_KEY["weather"].build("t")["source"].get("plain_text") is True)
+    _w_src = mt.BY_KEY["weather"].build("t")["source"]
+    check("天气模板用 Open-Meteo + weather 变换（wttr.in 整站连不上，已换源）",
+          "api.open-meteo.com" in str(_w_src.get("url"))
+          and (_w_src.get("transform") or {}).get("type") == "weather"
+          and "weather_code" in str(_w_src.get("url")), str(_w_src.get("url"))[:80])
     rp = sm.RuleProvider(mt.BY_KEY["countdown"].build("t", {"target": "00:00",
                                                              "done_text": "下班啦"}))
     check("倒计时到点后显示自定义文字", rp._fetch_clock(rp.rule["source"]) == "下班啦")
 
     # ===== 三、认出已有模块 =====
     print("\n--- 三、按内容认出模板 ---")
-    want = {"CPU": "builtin", "情绪": "builtin", "聚合AI": "webchat", "天气": "weather",
+    # 天气认成 builtin（换源后 sig 认 open-meteo，但 builtin 优先级更高——
+    # 它本来就是内置规则，编辑器按内置处理，比按 weather 模板更对）
+    want = {"CPU": "builtin", "情绪": "builtin", "聚合AI": "webchat", "天气": "builtin",
             "番茄钟": "tomato", "AI助手": "ai", "无限画布": "canvas"}
     got = {r["name"]: mt.match(r)[0].key for r in G._BUILTIN_RULES if r["name"] in want}
     check("内置模块认对了（CPU 这类内部脚本不当成自定义脚本摊给用户）", got == want, str(got))
@@ -212,7 +217,9 @@ try:
     d._fields["city"].setText("北京")
     d._accept()
     r = d.rule
-    check("添加天气：城市写进地址、带新 id、启用", r and "wttr.in/%E5%8C%97" in r["source"]["url"]
+    check("添加天气：城市存进 source.city（geocoding 在运行时换算坐标）、带新 id、启用",
+          r and str(r["source"].get("city", "")).find("北京") >= 0
+          and "api.open-meteo.com" in str(r["source"].get("url"))
           and r["id"].startswith("r") and r["enabled"] and r["name"] == "家里天气",
           str(r and r["source"]))
     check("新建的模块能被运行时接受", not sm._normalize_rule(copy.deepcopy(r))[1])

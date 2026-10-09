@@ -826,7 +826,7 @@ for _wname in ("tokenmeter", "stats"):
         _tm = getattr(_sb, _t, None)
         if _tm is not None:
             _tm.stop()
-    _sb._disp_rows = [("CPU", "50%", None), (_wname, "", _w2)]
+    _sb._disp_rows = [("CPU", "50%", None), ("", "", _w2)]   # 空标题=真实路径
     _sb._relayout()
     _sb.show()
     app.processEvents()

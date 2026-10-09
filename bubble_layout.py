@@ -514,6 +514,14 @@ class _LWidgetRow(QWidget):
         # 各 1px 边距挤成 13px，自带标题栏里的「展开」按钮就嵌不正。
         m_v = _kit_sc_b(1.5) if t else 0
         self._card_lay.setContentsMargins(_kit_sc_b(7.5), m_v, _kit_sc_b(7.5), m_v)
+        # 组件自己的折叠按钮：框架显示标题栏（折叠归框架管，待办）时藏掉它，
+        # 两颗"收起"叠着是用户报的 bug；框架不加标题栏（画布/统计/Token 自管
+        # 展开动画，on_resize 路径）时一个字都不动——动了会破坏它们的自折叠。
+        _own = getattr(self._widget, "_fold_btn", None)
+        if _own is not None:
+            _own.setVisible(not bool(t))
+            if t:
+                _own.setText(self.fold_btn.text())   # 万一哪天又显示，文案不漂
 
     def has_title(self):
         # 用 isHidden 而非 isVisible：布局阶段组件可能尚未显示，isVisible 会误判
@@ -816,16 +824,12 @@ class StatusBubbleLayout(StatusBubble):
                         wrap = _LWidgetRow(self._content)
                         self._wrap_cache[key] = wrap
                     wrap.set_widget(widget)
-                    # 标题栏：自带标题栏/折叠按钮的组件（对话面板、画布/拼豆/统计/
-                    # Token、**待办**）整条框架标题栏不加 —— 否则两颗"收起/展开"
-                    # 叠在一起（用户实测待办：框架一颗 + 组件自己的 _fold_btn 一颗）。
-                    # 名单收口在 module_core._TITLE_LESS_WIDGET_UIS，别在这里散着认类型
-                    # （以前只认 ChatPanel，待办就是这么漏的）。
-                    import module_core as _mc
-                    _ui = str(getattr(widget, "oi_ui", "") or "")
-                    _own_head = (isinstance(widget, ChatPanel)
-                                 or _ui in _mc._TITLE_LESS_WIDGET_UIS)
-                    wrap.set_title("" if _own_head else title)
+                    # 标题栏：对话面板自带标题栏，其余组件（待办/番茄/面板等）统一加。
+                    # 组件自己的重复折叠按钮在 set_widget 里单藏（待办的 _fold_btn），
+                    # 不在这里认类型——名单进 _TITLE_LESS_WIDGET_UIS 的语义是
+                    # "连标题都不要"，待办需要标题，走那条路会把标题藏掉。
+                    wrap.set_title(title
+                                   if not isinstance(widget, ChatPanel) else "")
                     wrap.on_fold = self._on_row_fold
                     wrap.set_collapsed(self._is_row_collapsed(key))
                     wrap.setFixedWidth(width - self._out_m

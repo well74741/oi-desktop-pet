@@ -1178,7 +1178,15 @@ def _llm_json_array(prompt):
     # （deepseek-flash，reasoning_content 吃掉全部预算）在"思考"里耗尽
     # token、content 为空，报出来却是误导性的"AI 未返回像素指令"。
     max_tokens = max(int(cfg.get("max_tokens", 8192) or 8192), 8192)
-    body = {"model": cfg.get("model", "deepseek-chat"),
+    model = str(cfg.get("model", "deepseek-chat") or "deepseek-chat")
+    # 只要 JSON 的工具调用不用推理模型：thinking 关不掉（enable_thinking=false
+    # 实测无效，flash 照样先思考 1000+ 字），推理模型的"先想后答"对"画只猫"
+    # 这种任务纯属浪费——deepseek-flash 思考到超时 content=0，deepseek-chat
+    # 1.8s 直接出数组。同厂非推理款自动顶上（同 key 可用，用户无需改配置）。
+    # 认"deepseek"厂：别家的同名模型不动。
+    if "deepseek" in model.lower() and "chat" not in model.lower():
+        model = "deepseek-chat"
+    body = {"model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7, "max_tokens": max_tokens}
     req = urllib.request.Request(
@@ -1198,9 +1206,9 @@ def _llm_json_array(prompt):
         if str(ch.get("finish_reason") or "") == "length":
             raise RuntimeError(
                 "AI 回复被 max_tokens=%d 截断（finish_reason=length，思考 %d 字），"
-                "模型 %s 是推理模型，请换普通模型或在对话模型配置里调大 max_tokens"
-                % (max_tokens, len(msg.get("reasoning_content") or ""),
-                   cfg.get("model")))
+                "模型 %s 是推理模型（思考 %d 字后仍没写正文），绘画工具已自动换 "
+                "deepseek-chat 重试过；仍失败请在 AI 设置换普通模型"
+                % (model, len(msg.get("reasoning_content") or "")))
         raise RuntimeError("AI 返回了空内容（模型 %s）" % cfg.get("model"))
     # 提取 JSON 数组：AI 可能带 ```json 包裹、说明文字、尾部注释。
     # 候选按稳健度排序，谁先解析成功用谁：
@@ -1747,7 +1755,12 @@ class RuleProvider(StatusProvider):
 
     规则项（pet_settings.json 的 status_rules 列表）：
         {"id": "...", "name": "天气", "interval": 600, "enabled": true,
-         "source": {"type": "http", "url": "https://wttr.in/?format=%c+%t", "timeout": 5},
+         # Open-Meteo（wttr.in 整站连不上了）。城市默认北京，带 weather 变换取图标+温度
+         "source": {"type": "http",
+                    "url": "https://api.open-meteo.com/v1/forecast"
+                           "?latitude=39.9075&longitude=116.39723"
+                           "&current=temperature_2m,weather_code&timezone=auto",
+                    "timeout": 8, "transform": {"type": "weather"}},
          "transform": {"type": "text", "pattern": "^(.*)$", "replacement": "天气：$1"},
          "fallback": "天气获取失败"}
     """
@@ -2529,6 +2542,13 @@ class RuleProvider(StatusProvider):
             # 就抛异常、永远显示"获取失败"。按 jsonpath 理解。
             tr = {"type": "jsonpath", "path": tr}
         t = tr.get("type", "text")
+        if t == "weather":
+            # 天气专用：Open-Meteo 的 weather_code 查表出图标，拼上温度
+            try:
+                data = raw if isinstance(raw, dict) else json.loads(raw)
+            except Exception:
+                data = raw
+            return _weather_text(data)
         if t == "jsonpath":
             try:
                 data = raw if isinstance(raw, (dict, list)) else json.loads(raw)
@@ -2545,6 +2565,41 @@ class RuleProvider(StatusProvider):
                 return re.sub(pat, rep, str(raw))
             except Exception:
                 return str(raw)
+        return str(raw)
+
+
+# WMO 天气代码 -> 图标（Open-Meteo 官方表）。天气模块的 transform 用它
+# 把 {"current": {"temperature_2m": .., "weather_code": ..}} 拼成 "⛅ +19°C"。
+_WMO_EMOJI = {
+    0: "☀", 1: "🌤", 2: "⛅", 3: "☁",
+    45: "🌫", 48: "🌫",
+    51: "🌦", 53: "🌦", 55: "🌧",
+    56: "🌧", 57: "🌧",
+    61: "🌦", 63: "🌧", 65: "🌧",
+    66: "🌧", 67: "🌧",
+    71: "🌨", 73: "🌨", 75: "❄", 77: "❄",
+    80: "🌦", 81: "🌧", 82: "⛈",
+    85: "🌨", 86: "🌨",
+    95: "⛈", 96: "⛈", 99: "⛈",
+}
+
+
+def _weather_text(raw):
+    """Open-Meteo 响应 -> "emoji +温度°C"（拼不上就原样返回字符串）。"""
+    try:
+        cur = raw.get("current") if isinstance(raw, dict) else None
+        if not isinstance(cur, dict):
+            return str(raw)
+        code = int(cur.get("weather_code", -1))
+        t = cur.get("temperature_2m")
+        emoji = _WMO_EMOJI.get(code, "?")
+        if t is None:
+            return emoji
+        try:
+            return "%s %+g°C" % (emoji, float(t))
+        except Exception:
+            return "%s %s" % (emoji, t)
+    except Exception:
         return str(raw)
 
 

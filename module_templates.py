@@ -224,20 +224,41 @@ def _widget(key, group, title, desc, ui=None, interval=3600, aliases=()):
 
 
 # ---- 几个参数和字段不是一一对应的模板 ----
-_WTTR = re.compile(r"^(https?://wttr\.in/)([^?]*)(\?.*)?$")
+# 天气源：Open-Meteo（免 key）。wttr.in 曾整站连不上（实测 12s 超时、HTTP 000），
+# "天气模块获取失败"就是它挂了——换源，不是修它。
+# city 经 geocoding 转坐标拼进 URL；城市名另存 source.city，读回时还原表单。
+_OM_URL = re.compile(
+    r"^https?://api\.open-meteo\.com/v1/forecast"
+    r"\?latitude=([\d.]+)&longitude=([\d.]+)")
 
 
 def _weather_read(rule):
-    m = _WTTR.match(str(_src(rule).get("url", "")))
-    return {"city": unquote(m.group(2)).strip("/")} if m else None
+    src = _src(rule)
+    m = _OM_URL.match(str(src.get("url", "")))
+    return {"city": str(src.get("city", "") or "")} if m else None
 
 
 def _weather_write(rule, p):
+    """城市名 -> 坐标写进 URL。geocoding 失败时坐标不动、城市名照存，
+    不让一次网络抖动把模块弄坏。留空 = 沿用现有坐标。"""
     src = rule.setdefault("source", {})
-    m = _WTTR.match(str(src.get("url", "")))
-    query = (m.group(3) if m else None) or "?format=%c+%t"
-    src["url"] = "https://wttr.in/%s%s" % (quote(p["city"].strip()), query)
-    src["plain_text"] = True       # 不带它 wttr.in 会按浏览器返回整张网页
+    city = str(p.get("city", "") or "").strip()
+    src["city"] = city
+    if not city:
+        return
+    try:
+        import urllib.request
+        with urllib.request.urlopen(
+                "https://geocoding-api.open-meteo.com/v1/search?name=%s"
+                "&count=1&language=zh&format=json" % quote(city), timeout=8) as r:
+            res = (json.loads(r.read(65536).decode("utf-8")).get("results") or [{}])[0]
+        lat, lon = res["latitude"], res["longitude"]
+        src["city"] = str(res.get("name") or city)
+    except Exception:
+        return
+    src["url"] = ("https://api.open-meteo.com/v1/forecast"
+                  "?latitude=%s&longitude=%s"
+                  "&current=temperature_2m,weather_code&timezone=auto" % (lat, lon))
 
 
 _ERAPI = re.compile(r"^https?://open\.er-api\.com/v6/latest/([A-Za-z]+)")
@@ -363,13 +384,18 @@ TEMPLATES = [
     # ================= 常用 =================
     Template(
         "weather", "常用", "天气",
-        "显示本地天气（来自 wttr.in），不填城市也能用。",
+        "显示当前天气（Open-Meteo，免 key），不填城市默认北京。",
         {"interval": 1800, "fallback": "天气获取失败",
-         "source": {"type": "http", "url": "https://wttr.in/?format=%c+%t",
-                    "timeout": 5, "plain_text": True}},
-        [Param("city", "城市", "", "留空 = 按网络自动定位")],
-        sig=lambda r: _stype(r) == "http" and "wttr.in" in str(_src(r).get("url", "")),
-        ai_desc="天气（wttr.in，参数 city 可选，留空自动定位）",
+         "source": {"type": "http",
+                    "url": ("https://api.open-meteo.com/v1/forecast"
+                            "?latitude=39.9075&longitude=116.39723"
+                            "&current=temperature_2m,weather_code&timezone=auto"),
+                    "timeout": 8, "city": "",
+                    "transform": {"type": "weather"}}},
+        [Param("city", "城市", "", "留空 = 默认北京；填中文城市名")],
+        sig=lambda r: (_stype(r) == "http"
+                       and "api.open-meteo.com" in str(_src(r).get("url", ""))),
+        ai_desc="天气（Open-Meteo 免 key，参数 city 可选，留空默认北京）",
         refresh=True, popup=True, read=_weather_read, write=_weather_write),
     Template(
         "countdown", "常用", "倒计时",
