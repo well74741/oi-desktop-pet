@@ -16,7 +16,10 @@ import time
 APP_VERSION = "0.9.43"
 
 _CHAT_PANEL_UIS = {"chat"}
-_TITLE_LESS_WIDGET_UIS = {"canvas", "tokenmeter", "stats", "perler"}
+# 自带标题栏/折叠按钮的组件：气泡不再给它们加框架标题栏（否则两颗
+# "收起/展开"叠在一起 —— 待办实测：['收起','添加','删除选中','清空','收起']）。
+# 加新组件时：自带 _fold_btn 的进这个名单，没有的别进（否则没有收起入口）。
+_TITLE_LESS_WIDGET_UIS = {"canvas", "tokenmeter", "stats", "perler", "todo"}
 # 纯本地计算、没有任何 I/O 的源类型：算一次也就几微秒，不值得为它起线程，
 # 刷新间隔也不必和网络模块一样压到 5 秒起（时钟压到 5 秒就会慢半拍跳分钟）。
 _LOCAL_SOURCE_TYPES = {"clock", "static"}

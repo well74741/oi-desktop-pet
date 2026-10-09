@@ -155,6 +155,9 @@ def load_module_widget(name, parent=None):
         w = cls(parent=parent) if parent is not None else cls()
         # 组件内部尺寸已按 kit.bs() 放大；放进设置窗测试区时不能再被统一放大一次
         w.setProperty("oi_nozoom", True)
+        # ui 名挂在实例上：气泡按它查"自带标题栏"名单（module_core 的
+        # _TITLE_LESS_WIDGET_UIS），决定要不要给这行加框架标题栏/收起按钮
+        w.oi_ui = str(name)
         # 公共基础样式按当前档位缩放；组件自身样式已在构造时按规范缩放。
         try:
             own = w.styleSheet() or ""

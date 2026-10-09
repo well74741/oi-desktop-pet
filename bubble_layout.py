@@ -816,9 +816,16 @@ class StatusBubbleLayout(StatusBubble):
                         wrap = _LWidgetRow(self._content)
                         self._wrap_cache[key] = wrap
                     wrap.set_widget(widget)
-                    # 标题栏：对话面板自带标题栏，其余组件（待办/番茄/面板等）统一加
-                    wrap.set_title(title
-                                   if not isinstance(widget, ChatPanel) else "")
+                    # 标题栏：自带标题栏/折叠按钮的组件（对话面板、画布/拼豆/统计/
+                    # Token、**待办**）整条框架标题栏不加 —— 否则两颗"收起/展开"
+                    # 叠在一起（用户实测待办：框架一颗 + 组件自己的 _fold_btn 一颗）。
+                    # 名单收口在 module_core._TITLE_LESS_WIDGET_UIS，别在这里散着认类型
+                    # （以前只认 ChatPanel，待办就是这么漏的）。
+                    import module_core as _mc
+                    _ui = str(getattr(widget, "oi_ui", "") or "")
+                    _own_head = (isinstance(widget, ChatPanel)
+                                 or _ui in _mc._TITLE_LESS_WIDGET_UIS)
+                    wrap.set_title("" if _own_head else title)
                     wrap.on_fold = self._on_row_fold
                     wrap.set_collapsed(self._is_row_collapsed(key))
                     wrap.setFixedWidth(width - self._out_m
