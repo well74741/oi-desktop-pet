@@ -149,9 +149,9 @@ try:
 
     # ===== 三、认出已有模块 =====
     print("\n--- 三、按内容认出模板 ---")
-    # 天气认成 builtin（换源后 sig 认 open-meteo，但 builtin 优先级更高——
-    # 它本来就是内置规则，编辑器按内置处理，比按 weather 模板更对）
-    want = {"CPU": "builtin", "情绪": "builtin", "聚合AI": "webchat", "天气": "builtin",
+    # 天氘认成 weather：内置定义与模板同源（都是 Open-Meteo），match 按内容
+    # 认回模板；编辑器 compose 会保留 builtin 标记，行为不受影响
+    want = {"CPU": "builtin", "情绪": "builtin", "聚合AI": "webchat", "天气": "weather",
             "番茄钟": "tomato", "AI助手": "ai", "无限画布": "canvas"}
     got = {r["name"]: mt.match(r)[0].key for r in G._BUILTIN_RULES if r["name"] in want}
     check("内置模块认对了（CPU 这类内部脚本不当成自定义脚本摊给用户）", got == want, str(got))

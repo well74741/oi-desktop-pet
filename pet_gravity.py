@@ -686,9 +686,14 @@ _BUILTIN_RULES = [
                 "code": "result = ''", "timeout": 5}},
     {"id": "builtin_weather", "name": "天气", "builtin": "weather",
      "interval": 3600, "enabled": True,
-     "source": {"type": "http", "url": "https://wttr.in/?format=%c+%t",
-                "timeout": 5, "plain_text": True},
-     "transform": {"type": "text", "pattern": "^(.*)$", "replacement": "$1"},
+     # Open-Meteo（wttr.in 整站连不上）。运行时 load_settings 会把这份定义
+     # 同步进用户已存的规则（source/transform/follow），启用/弹出保留用户设置
+     "source": {"type": "http",
+                "url": "https://api.open-meteo.com/v1/forecast"
+                       "?latitude=39.9075&longitude=116.39723"
+                       "&current=temperature_2m,weather_code&timezone=auto",
+                "timeout": 8},
+     "transform": {"type": "weather"},
      "fallback": "天气获取失败"},
     {"id": "builtin_pomodoro", "name": "番茄钟", "builtin": "pomodoro",
      "interval": 30, "enabled": False,
@@ -824,6 +829,16 @@ def load_settings() -> dict:
             if (r.get("id") == "builtin_webchat"
                     and r.get("name") == "聚合网页AI"):
                 r["name"] = "聚合AI"
+            # 内置规则的取数定义跟随模板升级：source/transform/fallback 用模板的，
+            # 用户的启用/弹出/嵌入/间隔保留。不带这条，模板换源永远到不了
+            # 已有用户——天气就是实例：wttr.in 整站挂了，代码换 Open-Meteo，
+            # 但用户配置里存的还是旧 wttr.in URL，一直"服务端错误"。
+            if r.get("builtin") in ("weather",):
+                r["source"] = dict(tpl.get("source") or {})
+                r["transform"] = dict(tpl.get("transform")
+                                      or tpl.get("source", {}).get("transform")
+                                      or {"type": "text"})
+                r["fallback"] = tpl.get("fallback", r.get("fallback"))
             bk = r.get("builtin")
             if r.get("id") in new_builtin_ids:
                 if bk in ("cpu", "memory", "battery", "network") and bk in st_en:

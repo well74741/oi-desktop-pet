@@ -243,6 +243,10 @@ def _weather_write(rule, p):
     不让一次网络抖动把模块弄坏。留空 = 沿用现有坐标。"""
     src = rule.setdefault("source", {})
     city = str(p.get("city", "") or "").strip()
+    # 空城市且原本没存过：不写这个键——写了会让"打开再保存"凭空多出 city:""，
+    # 与原规则不等（编辑器 roundtrip 测试就这么挂的）。留空 = 用默认坐标。
+    if not city and "city" not in src:
+        return
     src["city"] = city
     if not city:
         return
